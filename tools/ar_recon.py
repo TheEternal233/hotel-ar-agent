@@ -121,7 +121,7 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
                     found = True
                     break
 
-        if not found and oamt > 0:
+        if not found and not oid and not identify_no and oamt > 0:  # 必须没有订单号才允许金额兜底
             best_ci = -1
             best_diff = float("inf")
             for ci in range(len(rezen_records)):
