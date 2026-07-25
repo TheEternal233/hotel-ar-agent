@@ -1,0 +1,273 @@
+/* Hotel AR AI Agent v3 - Full Interactive */
+(function() {
+  "use strict";
+  console.log("[AR Agent] Init...");
+
+  const API = "/api";
+  const uploadedFiles = [];
+
+  // ===== Navigation =====
+  function switchPanel(name) {
+    console.log("[AR] -> " + name);
+    document.querySelectorAll(".nav-item").forEach(function(i) { i.classList.remove("active"); });
+    var nav = document.querySelector('.nav-item[data-module="' + name + '"]');
+    if (nav) nav.classList.add("active");
+    document.querySelectorAll(".panel").forEach(function(p) { p.classList.remove("active"); });
+    var panel = document.getElementById("panel-" + name);
+    if (panel) panel.classList.add("active");
+  }
+  window.switchPanel = switchPanel;
+
+  document.querySelectorAll(".nav-item").forEach(function(item) {
+    item.addEventListener("click", function(e) { e.preventDefault(); switchPanel(item.dataset.module); });
+  });
+
+  // ===== Helpers =====
+  function setResult(elId, text) { var el = document.getElementById(elId); if (el) el.textContent = text; }
+  function showLoading(elId) { setResult(elId, "Processing..."); }
+  function btnDisable(el, label) { el.disabled = true; el.textContent = label || "Processing..."; }
+  function btnEnable(el, label) { el.disabled = false; el.textContent = label; }
+
+  async function uploadAndGetPath(fileInputId) {
+    var input = document.getElementById(fileInputId);
+    if (!input || !input.files[0]) return null;
+    var fd = new FormData(); fd.append("file", input.files[0]);
+    var r = await fetch(API + "/upload", { method: "POST", body: fd });
+    var d = await r.json(); uploadedFiles.push(d);
+    return d.path;
+  }
+
+  async function callChat(message) {
+    var r = await fetch(API + "/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: message, thread_id: "web-" + Date.now() })
+    });
+    var d = await r.json(); return d.response || "";
+  }
+
+  // ===== OTA Step Updater =====
+  function updateOtaStep(n) {
+    var steps = document.querySelectorAll("#panel-ota .step");
+    steps.forEach(function(s, i) {
+      s.classList.remove("active", "completed");
+      if (i + 1 < n) s.classList.add("completed");
+      if (i + 1 === n) s.classList.add("active");
+    });
+  }
+
+  // ===== File Upload (chat) =====
+  async function handleUpload(e) {
+    var s = document.getElementById("uploadStatus");
+    var files = e.target.files;
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i]; s.textContent = "Uploading: " + f.name;
+      var fd = new FormData(); fd.append("file", f);
+      var r = await fetch(API + "/upload", { method: "POST", body: fd });
+      var d = await r.json(); uploadedFiles.push(d);
+      addMsg("system", "[Uploaded] " + f.name + " (" + (d.size/1024).toFixed(1) + "KB)");
+    }
+    s.textContent = uploadedFiles.length ? uploadedFiles.length + " files" : "";
+    e.target.value = "";
+  }
+  window.handleUpload = handleUpload;
+
+  // ===== Chat =====
+  function sendMessage() {
+    var input = document.getElementById("chatInput"), msg = input.value.trim();
+    if (!msg) return; addMsg("user", msg); input.value = ""; streamChat(msg);
+  }
+  window.sendMessage = sendMessage;
+
+  async function streamChat(msg) {
+    addMsg("system", "Thinking...", "think");
+    var r = await fetch(API + "/chat/stream", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: msg, thread_id: "web-" + Date.now() })
+    });
+    var reader = r.body.getReader(), dec = new TextDecoder(), full = "";
+    removeThink();
+    while (1) {
+      var result = await reader.read(); if (result.done) break;
+      var lines = dec.decode(result.value).split("\n");
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li]; if (!line.startsWith("data: ")) continue;
+        var d = line.slice(6); if (d === "[DONE]") break;
+        try { var p = JSON.parse(d);
+          if (p.type === "token") { full += p.content; updateStream(full); }
+          else if (p.type === "tool_start") addMsg("system", "[Tool] " + p.name);
+          else if (p.type === "tool_end") addMsg("system", "[Tool Done] " + p.name);
+          else if (p.type === "error") addMsg("system", "[Error] " + p.content);
+        } catch(ex) {}
+      }
+    }
+    finalizeStream(full);
+  }
+
+  var sd = null;
+  function removeThink() { var t = document.getElementById("think"); if (t) t.remove();
+    sd = document.createElement("div"); sd.className = "msg system"; sd.id = "stream";
+    sd.innerHTML = '<div class="msg-content"></div>';
+    document.getElementById("chatMessages").appendChild(sd); }
+  function updateStream(c) { if (sd) { sd.querySelector(".msg-content").textContent = c;
+    document.getElementById("chatMessages").scrollTop = document.getElementById("chatMessages").scrollHeight; }}
+  function finalizeStream(c) { if (c) updateStream(c); sd = null; }
+  function addMsg(role, content, id) {
+    var c = document.getElementById("chatMessages"), d = document.createElement("div");
+    d.className = "msg " + role; if (id) d.id = id;
+    d.innerHTML = '<div class="msg-content">' + content.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</div>";
+    c.appendChild(d); c.scrollTop = c.scrollHeight;
+  }
+
+  var ci = document.getElementById("chatInput");
+  if (ci) ci.addEventListener("keydown", function(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }});
+
+  // ===== OTA Recon (with step progress) =====
+  function updateOtaPath() {
+    var f = document.getElementById("otaFile").files[0];
+    document.getElementById("otaPathHint").textContent = f ? f.name : "";
+  }
+  function updatePmsPath() {
+    var f = document.getElementById("pmsFile").files[0];
+    document.getElementById("pmsPathHint").textContent = f ? f.name : "";
+  }
+  window.updateOtaPath = updateOtaPath;
+  window.updatePmsPath = updatePmsPath;
+
+  window.runOtaRecon = async function() {
+    var btn = document.querySelector("#panel-ota .btn-primary");
+    btnDisable(btn, "Processing..."); updateOtaStep(1); showLoading("otaResult");
+    try {
+      var otaPath = await uploadAndGetPath("otaFile");
+      if (!otaPath) { setResult("otaResult", "Error: Please upload OTA file"); btnEnable(btn, "Start Recon"); return; }
+      updateOtaStep(2); setResult("otaResult", "OTA uploaded. Uploading PMS...");
+      var pmsPath = await uploadAndGetPath("pmsFile");
+      if (!pmsPath) { setResult("otaResult", "Error: Please upload PMS file"); btnEnable(btn, "Start Recon"); return; }
+      updateOtaStep(3); setResult("otaResult", "Matching orders...");
+      var resp = await callChat("\u5bf9\u8d26 OTA:" + otaPath + " PMS:" + pmsPath);
+      updateOtaStep(4); setResult("otaResult", "Calculating commission...");
+      await new Promise(function(r) { setTimeout(r, 500); });
+      updateOtaStep(5); setResult("otaResult", resp || "Done");
+    } catch(e) { setResult("otaResult", "Error: " + e.message); }
+    btnEnable(btn, "Start Recon");
+  };
+
+  // ===== Aging (with dashboard update) =====
+  window.runAging = async function() {
+    var btn = document.querySelector("#panel-aging .btn-primary");
+    btnDisable(btn); showLoading("agingResult");
+    try {
+      var path = await uploadAndGetPath("agingFile");
+      if (!path) { setResult("agingResult", "Error: Please upload AR ledger"); btnEnable(btn, "Start Analysis"); return; }
+      var date = document.getElementById("agingDate").value || "";
+      var msg = "\u8d26\u9f84\u5206\u6790 \u6587\u4ef6:" + path + (date ? " \u622a\u6b62\u65e5\u671f:" + date : "");
+      var resp = await callChat(msg);
+      setResult("agingResult", resp);
+      // Try to parse amounts from response and update dashboard
+      var ids = {"1-30":"a30","31-60":"a60","61-90":"a90","91-120":"a120","121-180":"a180","180+":"a180p"};
+      for (var key in ids) {
+        var re = new RegExp(key + ".*?([0-9,]+\.?[0-9]*)", "i");
+        var m = resp.match(re);
+        if (m) document.getElementById(ids[key]).textContent = m[1];
+      }
+    } catch(e) { setResult("agingResult", "Error: " + e.message); }
+    btnEnable(btn, "Start Analysis");
+  };
+
+  // ===== Daily Check =====
+  window.runDailyCheck = async function() {
+    var btn = document.querySelector("#panel-daily .btn-primary");
+    btnDisable(btn); showLoading("dailyResult");
+    try {
+      var night = await uploadAndGetPath("nightFile"), ar = await uploadAndGetPath("arLedgerFile");
+      if (!night || !ar) { setResult("dailyResult", "Error: Please upload both files"); btnEnable(btn, "Start Check"); return; }
+      var resp = await callChat("\u591c\u5ba1\u65e5\u62a5\u6838\u5bf9 \u591c\u5ba1:" + night + " \u53f0\u8d26:" + ar);
+      setResult("dailyResult", resp);
+    } catch(e) { setResult("dailyResult", "Error: " + e.message); }
+    btnEnable(btn, "Start Check");
+  };
+
+  // ===== Daily AR (with card feedback) =====
+  window.runDailyAr = async function(type) {
+    var label = type || "all";
+    var card = document.querySelector('#panel-ar .ar-card[onclick*="' + type + '"]');
+    if (card) { card.style.opacity = "0.5"; card.style.pointerEvents = "none"; }
+    showLoading("arResult");
+    try {
+      var resp = await callChat("\u6bcf\u65e5\u5e94\u6536\u5904\u7406 " + type);
+      setResult("arResult", type.toUpperCase() + " result:\n" + (resp || "Done"));
+    } catch(e) { setResult("arResult", "Error: " + e.message); }
+    if (card) { card.style.opacity = "1"; card.style.pointerEvents = "auto"; }
+  };
+
+  // ===== Card Recon =====
+  window.runCardRecon = async function() {
+    var btn = document.querySelector("#panel-card .btn-primary");
+    btnDisable(btn); showLoading("cardResult");
+    try {
+      var bank = await uploadAndGetPath("bankFile"), pms = await uploadAndGetPath("pmsCardFile");
+      if (!bank || !pms) { setResult("cardResult", "Error: Please upload both files"); btnEnable(btn, "Start Recon"); return; }
+      var resp = await callChat("\u4fe1\u7528\u5361\u5bf9\u8d26 \u94f6\u884c:" + bank + " PMS:" + pms);
+      setResult("cardResult", resp);
+    } catch(e) { setResult("cardResult", "Error: " + e.message); }
+    btnEnable(btn, "Start Recon");
+  };
+
+  // ===== Ctrip =====
+  window.runCtrip = async function() {
+    var btn = document.querySelector("#panel-ctrip .btn-primary");
+    btnDisable(btn); showLoading("ctripResult");
+    try {
+      var path = await uploadAndGetPath("ctripFile");
+      if (!path) { setResult("ctripResult", "Error: Please upload Ctrip settlement"); btnEnable(btn, "Calculate Commission"); return; }
+      var resp = await callChat("\u643a\u7a0b\u4f63\u91d1\u8ba1\u7b97 \u6587\u4ef6:" + path);
+      setResult("ctripResult", resp);
+    } catch(e) { setResult("ctripResult", "Error: " + e.message); }
+    btnEnable(btn, "Calculate Commission");
+  };
+
+  // ===== Config (with card feedback) =====
+  window.runConfig = async function(action) {
+    var actions = { validate: "validate_environment", accounts: "list_accounts", credit: "list_credit_rules", check: "check_data_format" };
+    var label = action || "unknown";
+    var card = document.querySelector('#panel-config .config-card[onclick*="' + label + '"]');
+    if (card) { card.style.opacity = "0.5"; card.style.pointerEvents = "none"; }
+    showLoading("configResult");
+    try {
+      var resp = await callChat("\u6570\u636e\u51c6\u5907 " + (actions[action] || action));
+      setResult("configResult", resp || "Done");
+    } catch(e) { setResult("configResult", "Error: " + e.message); }
+    if (card) { card.style.opacity = "1"; card.style.pointerEvents = "auto"; }
+  };
+
+  // ===== Scheduler (with result area) =====
+  window.scheduleRun = async function(mode) {
+    var btn = document.querySelector('#panel-scheduler .sched-card button[onclick*="' + mode + '"]');
+    if (btn) btnDisable(btn, "Running...");
+    var label = mode === "daily" ? "\u65e5\u6e05" : "\u6708\u5ea6";
+    // Show result in scheduler panel if result div exists, else chat
+    try {
+      var resp = await callChat("\u6267\u884c" + label + "\u4efb\u52a1");
+      var resultEl = document.getElementById("schedulerResult");
+      if (resultEl) { resultEl.textContent = resp; }
+      else { addMsg("system", "[Scheduler " + label + "] " + (resp || "Done")); }
+    } catch(e) {
+      addMsg("system", "[Scheduler Error] " + e.message);
+    }
+    if (btn) btnEnable(btn, mode === "daily" ? "Execute Daily" : "Execute Monthly");
+  };
+
+  window.viewApprovals = function() {
+    addMsg("system", "[Approval] Queue will be configured during deployment");
+  };
+
+  // ===== Health =====
+  async function checkHealth() {
+    try { var r = await fetch(API + "/health"), d = await r.json();
+      document.getElementById("statusText").textContent = d.status || "OK";
+      document.getElementById("statusDot").className = "status-dot";
+    } catch(e) { document.getElementById("statusText").textContent = "Offline";
+      document.getElementById("statusDot").className = "status-dot error"; }
+  }
+  checkHealth(); setInterval(checkHealth, 30000);
+  console.log("[AR Agent] Ready");
+})();

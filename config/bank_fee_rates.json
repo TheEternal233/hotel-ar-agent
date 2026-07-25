@@ -1,0 +1,18 @@
+{
+  "description": "信用卡手续费费率表",
+  "banks": {
+    "工商银行": {
+      "debit_rate": 0.005,
+      "credit_rate": 0.01
+    },
+    "其他": {
+      "debit_rate": 0.01,
+      "credit_rate": 0.03
+    }
+  },
+  "matching_rules": {
+    "amount_tolerance": 0.01,
+    "time_window_days": 1,
+    "card_number_match_length": 4
+  }
+}

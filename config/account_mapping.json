@@ -1,0 +1,105 @@
+{
+  "description": "清远芊丽酒店 K03 会计科目与渠道配置",
+  "hotel": "K03 清远芊丽酒店",
+  "departments": {
+    "FO": "前厅部",
+    "HSKP": "客房部",
+    "F&B": "餐饮部",
+    "SALES": "销售部",
+    "FIN": "财务部"
+  },
+  "accounts": {
+    "1122": "应收账款",
+    "112201": "应收账款-OTA",
+    "11220101": "应收账款-OTA-携程",
+    "11220102": "应收账款-OTA-美团",
+    "11220103": "应收账款-OTA-飞猪",
+    "11220104": "应收账款-OTA-抖音",
+    "11220105": "应收账款-OTA-向蜜鸟",
+    "112202": "应收账款-企业协议",
+    "112203": "应收账款-旅行社",
+    "112204": "应收账款-长住客",
+    "112205": "应收账款-信用卡",
+    "112206": "应收账款-预付卡YFD",
+    "1123": "预付账款",
+    "112301": "预付账款-预授权",
+    "112302": "预付账款-押金",
+    "1231": "坏账准备",
+    "6001": "主营业务收入-客房",
+    "6601": "销售费用-佣金",
+    "6602": "管理费用-信用卡手续费"
+  },
+  "ota_channels": {
+    "携程客房": {
+      "match_key": "order_id",
+      "pms_key": "ext_order",
+      "amount_col": "settle_amount",
+      "description": "订单号精确匹配 + 金额核对"
+    },
+    "携程餐饮": {
+      "match_key": "voucher_no",
+      "pms_key": "bill_no",
+      "amount_col": "sell_price",
+      "description": "券号→结账单号 + 卖价金额匹配"
+    },
+    "美团客房": {
+      "match_key": "order_id",
+      "pms_key": "ext_order",
+      "amount_col": "amount",
+      "description": "美团订单号精确匹配"
+    },
+    "美团餐饮": {
+      "match_key": "order_id",
+      "pms_key": "ext_order",
+      "amount_col": "sell_price",
+      "description": "订单号+券号双键匹配"
+    },
+    "飞猪": {
+      "match_key": "order_id",
+      "pms_key": "ext_order",
+      "amount_col": "amount",
+      "description": "订单号/套餐订单号匹配"
+    },
+    "抖音": {
+      "match_key": "order_id",
+      "pms_key": "ext_order",
+      "amount_col": "amount",
+      "description": "订单编号匹配"
+    },
+    "向蜜鸟": {
+      "match_key": "order_id",
+      "pms_key": "ext_order",
+      "amount_col": "amount",
+      "description": "订单号匹配 + 识别号辅助"
+    }
+  },
+  "commission_rules": {
+    "携程": {
+      "rate": 0.15,
+      "calc_base": "含税金额",
+      "tax_divisor": 1.06
+    },
+    "美团": {
+      "rate": 0.12,
+      "calc_base": "含税金额",
+      "tax_divisor": 1.06
+    },
+    "飞猪": {
+      "rate": 0.10,
+      "calc_base": "含税金额",
+      "tax_divisor": 1.06
+    }
+  },
+  "payment_codes": {
+    "9001": "现金",
+    "9002": "信用卡",
+    "9003": "借记卡",
+    "9004": "支付宝",
+    "9005": "微信",
+    "9006": "OTA卡",
+    "9007": "预付卡",
+    "9008": "挂账",
+    "9101": "YFD支付宝",
+    "9102": "YFD微信"
+  }
+}

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>酒店应收会计 AI 智能体系统</title>
+<link rel="stylesheet" href="/frontend/style.css">
+</head>
+<body>
+<div id="app">
+<aside id="sidebar">
+  <div class="logo"><h1>应收会计AI</h1><span class="version">v2.0</span></div>
+  <nav>
+    <div class="nav-section">核心功能</div>
+    <a href="#" data-module="chat" class="nav-item active" onclick="switchPanel(&apos;chat&apos;);return false"><span class="icon">Q</span>AI 对话</a>
+    <a href="#" data-module="ota" class="nav-item" onclick="switchPanel(&apos;ota&apos;);return false"><span class="icon">O</span>OTA对账工作台</a>
+    <a href="#" data-module="aging" class="nav-item" onclick="switchPanel(&apos;aging&apos;);return false"><span class="icon">A</span>账龄分析看板</a>
+    <a href="#" data-module="daily" class="nav-item" onclick="switchPanel(&apos;daily&apos;);return false"><span class="icon">D</span>每日核对工作台</a>
+    <a href="#" data-module="ar" class="nav-item" onclick="switchPanel(&apos;ar&apos;);return false"><span class="icon">R</span>每日应收处理</a>
+    <a href="#" data-module="card" class="nav-item" onclick="switchPanel(&apos;card&apos;);return false"><span class="icon">C</span>信用卡审核面板</a>
+    <a href="#" data-module="ctrip" class="nav-item" onclick="switchPanel(&apos;ctrip&apos;);return false"><span class="icon">X</span>携程佣金</a>
+    <div class="nav-section">系统管理</div>
+    <a href="#" data-module="config" class="nav-item" onclick="switchPanel(&apos;config&apos;);return false"><span class="icon">S</span>数据准备</a>
+    <a href="#" data-module="scheduler" class="nav-item" onclick="switchPanel(&apos;scheduler&apos;);return false"><span class="icon">T</span>智能调度</a>
+  </nav>
+  <div class="status-bar"><span class="status-dot" id="statusDot"></span><span id="statusText">就绪</span></div>
+</aside>
+
+<main id="main">
+
+<!-- Chat Panel -->
+<section id="panel-chat" class="panel active">
+  <div class="panel-header"><h2>AI 智能对话</h2><span class="hint">输入需求：对账、账龄分析、携程佣金、信用卡对账、发票管理...</span></div>
+  <div class="chat-container">
+    <div class="chat-messages" id="chatMessages">
+      <div class="msg system"><div class="msg-content">欢迎使用酒店应收会计AI智能体系统。我可以帮您：OTA对账 / 账龄分析 / 携程佣金 / 信用卡对账 / 协议客户对账 / 发票管理 / 环境验证。请直接输入需求或上传文件后开始。</div></div>
+    </div>
+    <div class="chat-input-area">
+      <div class="upload-bar">
+        <button class="btn-sm" onclick="document.getElementById('fileInput').click()">上传文件</button>
+        <input type="file" id="fileInput" multiple hidden onchange="handleUpload(event)">
+        <span id="uploadStatus"></span>
+      </div>
+      <div class="input-row">
+        <textarea id="chatInput" placeholder="输入需求，例如：对账、账龄分析..." rows="2"></textarea>
+        <button class="btn-primary" onclick="sendMessage()">发送</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- OTA Recon Panel -->
+<section id="panel-ota" class="panel">
+  <div class="panel-header"><h2>OTA平台月度对账工作台</h2></div>
+  <div class="workbench">
+    <div class="wb-steps">
+      <div class="step active"><span>1</span>上传文件</div>
+      <div class="step"><span>2</span>自动匹配</div>
+      <div class="step"><span>3</span>差异标注</div>
+      <div class="step"><span>4</span>佣金计算</div>
+      <div class="step"><span>5</span>凭证预览</div>
+    </div>
+    <div class="wb-form">
+      <div class="form-group"><label>OTA报表 (.xlsx)</label><input type="file" id="otaFile" accept=".xlsx,.xls" onchange="updateOtaPath()"><span class="path-hint" id="otaPathHint"></span></div>
+      <div class="form-group"><label>PMS营业报表 (.xlsx)</label><input type="file" id="pmsFile" accept=".xlsx,.xls" onchange="updatePmsPath()"><span class="path-hint" id="pmsPathHint"></span></div>
+      <button class="btn-primary" onclick="runOtaRecon()">开始对账</button>
+    </div>
+    <div class="wb-result" id="otaResult"></div>
+  </div>
+</section>
+
+<!-- Aging Panel -->
+<section id="panel-aging" class="panel">
+  <div class="panel-header"><h2>账龄分析看板</h2></div>
+  <div class="workbench">
+    <div class="wb-form">
+      <div class="form-group"><label>应收台账 (.xlsx)</label><input type="file" id="agingFile" accept=".xlsx,.xls"></div>
+      <div class="form-group"><label>截止日期</label><input type="date" id="agingDate"></div>
+      <button class="btn-primary" onclick="runAging()">开始分析</button>
+    </div>
+    <div class="aging-dashboard" id="agingDashboard">
+      <div class="aging-cards">
+        <div class="aging-card"><span class="ac-label">1-30天</span><span class="ac-value" id="a30">0</span></div>
+        <div class="aging-card"><span class="ac-label">31-60天</span><span class="ac-value" id="a60">0</span></div>
+        <div class="aging-card"><span class="ac-label">61-90天</span><span class="ac-value" id="a90">0</span></div>
+        <div class="aging-card warn"><span class="ac-label">91-120天</span><span class="ac-value" id="a120">0</span></div>
+        <div class="aging-card alert"><span class="ac-label">121-180天</span><span class="ac-value" id="a180">0</span></div>
+        <div class="aging-card critical"><span class="ac-label">180天+</span><span class="ac-value" id="a180p">0</span></div>
+      </div>
+      <div class="wb-result" id="agingResult" style="margin-top:16px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- Card Recon Panel -->
+<section id="panel-card" class="panel">
+  <div class="panel-header"><h2>信用卡对账审核面板</h2></div>
+  <div class="workbench">
+    <div class="wb-form">
+      <div class="form-group"><label>银行对账单 (.xlsx)</label><input type="file" id="bankFile" accept=".xlsx,.xls"></div>
+      <div class="form-group"><label>PMS信用卡收款记录 (.xlsx)</label><input type="file" id="pmsCardFile" accept=".xlsx,.xls"></div>
+      <button class="btn-primary" onclick="runCardRecon()">开始对账</button>
+    </div>
+    <div class="wb-result" id="cardResult"></div>
+  </div>
+</section>
+
+<!-- Ctrip Panel -->
+<section id="panel-ctrip" class="panel">
+  <div class="panel-header"><h2>携程佣金与付款通知</h2></div>
+  <div class="workbench">
+    <div class="wb-form">
+      <div class="form-group"><label>携程结算单 (.xlsx)</label><input type="file" id="ctripFile" accept=".xlsx,.xls"></div>
+      <button class="btn-primary" onclick="runCtrip()">计算佣金</button>
+    </div>
+    <div class="wb-result" id="ctripResult"></div>
+  </div>
+</section>
+
+<!-- Invoice Panel -->
+<section id="panel-invoice" class="panel">
+  <div class="panel-header"><h2>发票管理</h2></div>
+  <div class="workbench">
+    <div class="wb-form">
+      <div class="form-group"><label>应收数据 (.xlsx)</label><input type="file" id="invoiceFile" accept=".xlsx,.xls" onchange="uploadAndSetPath('invoiceFile','invoicePathHint')"><span class="path-hint" id="invoicePathHint"></span></div>
+      <div class="form-group"><label>发票类型</label><select id="invoiceType"><option>普通发票</option><option>专用发票</option></select></div>
+      <button class="btn-primary" onclick="runInvoice()">生成开票清单</button>
+    </div>
+    <div class="wb-result" id="invoiceResult"></div>
+  </div>
+</section>
+
+<!-- Corp Panel -->
+<section id="panel-corp" class="panel">
+  <div class="panel-header"><h2>协议企业客户对账</h2></div>
+  <div class="workbench">
+    <div class="wb-form">
+      <div class="form-group"><label>应收账务处理列表 (.xlsx)</label><input type="file" id="corpFile" accept=".xlsx,.xls" onchange="uploadAndSetPath('corpFile','corpPathHint')"><span class="path-hint" id="corpPathHint"></span></div>
+      <button class="btn-primary" onclick="runCorpRecon()">生成付款通知书</button>
+    </div>
+    <div class="wb-result" id="corpResult"></div>
+  </div>
+</section>
+
+<!-- Batch Panel -->
+<section id="panel-batch" class="panel">
+  <div class="panel-header"><h2>一键批量对账</h2><span class="hint">基于 data/清远/ 目录下的源数据自动执行全量对账</span></div>
+  <div class="workbench">
+    <div class="batch-grid">
+      <div class="batch-card" onclick="runBatchOta()">
+        <h3>OTA批量对账</h3>
+        <p>7个渠道: 携程/美团/飞猪/抖音/向蜜鸟</p>
+        <span class="batch-status" id="batchOtaStatus">就绪</span>
+      </div>
+      <div class="batch-card" onclick="runBatchCard()">
+        <h3>信用卡批量对账</h3>
+        <p>微信/支付宝/YFD预付卡/POS流水</p>
+        <span class="batch-status" id="batchCardStatus">就绪</span>
+      </div>
+      <div class="batch-card" onclick="runBatchAll()">
+        <h3>全部执行</h3>
+        <p>OTA + 信用卡 + 协议客户 + 携程佣金</p>
+        <span class="batch-status" id="batchAllStatus">就绪</span>
+      </div>
+    </div>
+    <div class="wb-result" id="batchResult"></div>
+  </div>
+</section>
+
+<!-- Config Panel -->
+<section id="panel-config" class="panel">
+  <div class="panel-header"><h2>数据准备与系统配置</h2></div>
+  <div class="workbench">
+    <div class="config-grid">
+      <button class="config-card" onclick="runConfig('validate')"><h3>环境验证</h3><p>检查运行环境和依赖</p></button>
+      <button class="config-card" onclick="runConfig('accounts')"><h3>科目对照</h3><p>查看会计科目与部门代码</p></button>
+      <button class="config-card" onclick="runConfig('credit')"><h3>信用规则</h3><p>查看客户信用与坏账政策</p></button>
+      <button class="config-card" onclick="runConfig('check')"><h3>格式检查</h3><p>验证上传文件格式</p></button>
+      <div class="form-group" style="margin-top:8px"><input type="file" id="configCheckFile" accept=".xlsx,.xls"><span style="font-size:12px;color:#888"> 选择要检查的文件</span></div>
+    </div>
+    <div class="wb-result" id="configResult" style="margin-top:16px"></div>
+  </div>
+</section>
+
+<!-- Scheduler Panel -->
+<section id="panel-scheduler" class="panel">
+  <div class="panel-header"><h2>智能调度与人工把关</h2></div>
+  <div class="workbench">
+    <div class="scheduler-grid">
+      <div class="sched-card"><h3>日清任务</h3><p>信用卡对账</p><button class="btn-primary" onclick="scheduleRun('daily')">执行日清</button></div>
+      <div class="sched-card"><h3>月度任务</h3><p>OTA对账、账龄分析、携程佣金</p><button class="btn-primary" onclick="scheduleRun('monthly')">执行月度</button></div>
+      <div class="sched-card"><h3>人工审批</h3><p id="approvalCount">待审批: 0</p><button class="btn-sm" onclick="viewApprovals()">查看审批</button></div></div><div class="wb-result" id="schedulerResult" style="margin-top:16px"></div>
+    </div>
+  </div>
+</section>
+
+</main>
+</div>
+<script src="/frontend/app.js"></script>
+</body>
+</html>

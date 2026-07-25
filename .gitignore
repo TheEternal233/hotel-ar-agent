@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Generated output
+output/
+ar_stats.txt
+AR审核_*.xlsx
+*.xlsx~ 
+
+# Uploads (runtime user data)
+uploads/
+
+# IDE
+.idea/
+.vscode/
