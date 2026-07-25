@@ -76,11 +76,20 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
 
         if oid:
             candidates = rezen_by_ext.get(oid, []) + rezen_by_order.get(oid, [])
+            # 第一轮：优先找订单号匹配且金额一致的
             for ci in candidates:
                 if ci in rezen_matched:
                     continue
                 ramt = _norm_amount(rezen_records[ci].get("amount", 0))
                 if abs(oamt - ramt) < 0.02:
+                    ri = ci
+                    found = True
+                    break
+            # 第二轮：只要订单号匹配就认定为同一订单（金额差异标记为diff）
+            if not found:
+                for ci in candidates:
+                    if ci in rezen_matched:
+                        continue
                     ri = ci
                     found = True
                     break

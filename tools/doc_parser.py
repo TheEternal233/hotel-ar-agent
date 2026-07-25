@@ -294,7 +294,7 @@ OTA_CHANNEL_MAPPINGS = {
             "linked_order": ["关联单号"],
             "voucher_code": ["券码"],
             "verify_id": ["核销ID"],
-            "amount": ["核销金额", "金额"],
+            "amount": ["订单实收金额","核销金额", "金额"],
         },
         "order_id_col": "order_id",
         "amount_col": "amount",
