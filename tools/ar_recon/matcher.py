@@ -224,3 +224,158 @@ def _match_ota_rezen_fnb(ota_records, rezen_records, channel_name):
         })
 
     return results, stats
+
+
+def match_xiangminiao(ota_list, pms_list, card_list=None):
+    # pms建索引
+    pms_by_ext = {}
+    pms_by_order = {}
+    for i, p in enumerate(pms_list):
+        ext = _norm_orderno(p.get("ext_order", ""))
+        od = _norm_orderno(p.get("order", ""))
+        if ext:
+            pms_by_ext.setdefault(ext, []).append(i)
+        if od:
+            pms_by_order.setdefault(od, []).append(i)
+
+    # 储值卡建索引：按订单号挂储值卡实际扣款金额
+    card_map = {}
+    if card_list:
+        for c in card_list:
+            oid = _norm_orderno(c.get("order_id", ""))
+            if oid:
+                card_map[oid] = c
+
+    used = set()
+    out = []
+
+    for ota in ota_list:
+        oid = _norm_orderno(ota.get("order_id", ""))
+        identify = _norm_orderno(ota.get("identify_no", ""))
+        pay_type = str(ota.get("pay_type", ""))
+
+        # 取OTA金额：储值卡优先读储值卡消费金额，否则读结算金额
+        if "储值" in pay_type:
+            amt = _norm_amount(ota.get("card_pay_amount", 0))
+            if amt == 0 and oid in card_map:
+                amt = _norm_amount(card_map[oid].get("card_amount", 0))
+            if amt == 0:
+                amt = _norm_amount(ota.get("settle_amount", 0))
+        else:
+            amt = _norm_amount(ota.get("settle_amount", 0))
+            if amt == 0:
+                amt = _norm_amount(ota.get("actual_settle", 0))
+
+        found = False
+        idx = -1
+
+        # 1) 订单号精确匹配：先找金额一致的，找不到就挂差异
+        if oid:
+            cands = pms_by_ext.get(oid, []) + pms_by_order.get(oid, [])
+            for i in cands:
+                if i in used:
+                    continue
+                if abs(amt - _norm_amount(pms_list[i].get("amount", 0))) < 0.02:
+                    idx = i
+                    found = True
+                    break
+            if not found and cands:
+                for i in cands:
+                    if i in used:
+                        continue
+                    idx = i
+                    found = True
+                    break
+
+        # 2) 识别号（券号短码）匹配：用于6.18元这类券消费，PMS里可能没有完整订单号
+        if not found and identify:
+            for i in range(len(pms_list)):
+                if i in used:
+                    continue
+                ext = _norm_orderno(pms_list[i].get("ext_order", ""))
+                od = _norm_orderno(pms_list[i].get("order", ""))
+                if identify in ext or identify in od:
+                    if abs(amt - _norm_amount(pms_list[i].get("amount", 0))) < 0.02:
+                        idx = i
+                        found = True
+                        break
+            # 识别号对上了但金额差一些，也先挂上，标记为diff
+            if not found:
+                for i in range(len(pms_list)):
+                    if i in used:
+                        continue
+                    ext = _norm_orderno(pms_list[i].get("ext_order", ""))
+                    od = _norm_orderno(pms_list[i].get("order", ""))
+                    if identify in ext or identify in od:
+                        idx = i
+                        found = True
+                        break
+
+        # 3) 兜底：没单号、没识别号时，±5元模糊匹配
+        if not found and amt > 0 and not oid and not identify:
+            best_i = -1
+            best_d = 999999
+            for i in range(len(pms_list)):
+                if i in used:
+                    continue
+                pms_amt = _norm_amount(pms_list[i].get("amount", 0))
+                if pms_amt <= 0:
+                    continue
+                d = abs(amt - pms_amt)
+                if d < 5 and d < best_d:
+                    best_d = d
+                    best_i = i
+            if best_i >= 0:
+                idx = best_i
+                found = True
+
+        # 写结果
+        if found:
+            used.add(idx)
+            pms_amt = _norm_amount(pms_list[idx].get("amount", 0))
+            diff = round(amt - pms_amt, 2)
+            out.append({
+                "status": "match" if abs(diff) < 0.02 else "diff",
+                "ota": ota,
+                "pms": pms_list[idx],
+                "ota_amount": amt,
+                "pms_amount": pms_amt,
+                "diff": diff,
+                "ota_order": oid,
+                "pms_ext_order": _norm_orderno(pms_list[idx].get("ext_order", "")),
+            })
+        else:
+            out.append({
+                "status": "ota_only",
+                "ota": ota,
+                "pms": None,
+                "ota_amount": amt,
+                "pms_amount": 0,
+                "diff": amt,
+                "ota_order": oid,
+                "pms_ext_order": "",
+            })
+
+    # pms剩余未匹配
+    for i, p in enumerate(pms_list):
+        if i not in used:
+            out.append({
+                "status": "pms_only",
+                "ota": None,
+                "pms": p,
+                "ota_amount": 0,
+                "pms_amount": _norm_amount(p.get("amount", 0)),
+                "diff": _norm_amount(p.get("amount", 0)),
+                "ota_order": "",
+                "pms_ext_order": _norm_orderno(p.get("ext_order", "")),
+            })
+
+    stats = {
+        "total_ota": len(ota_list),
+        "total_pms": len(pms_list),
+        "match": sum(1 for r in out if r["status"] == "match"),
+        "diff": sum(1 for r in out if r["status"] == "diff"),
+        "ota_only": sum(1 for r in out if r["status"] == "ota_only"),
+        "pms_only": sum(1 for r in out if r["status"] == "pms_only"),
+    }
+    return out, stats

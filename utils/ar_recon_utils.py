@@ -59,6 +59,60 @@ def _copy_sheet_to_wb(src_ws, dst_wb, title=None):
 
 
 
+import openpyxl
+
+def read_xiangminiao(path):
+    """向蜜鸟4-sheet单文件读取：返回 (ota_list, card_list, pms_list)"""
+    wb = openpyxl.load_workbook(path, data_only=True)
+
+    # ---------- PMS sheet ----------
+    pms_list = []
+    ws = wb["PMS"]
+    for row in ws.iter_rows(min_row=3, values_only=True):
+        if not row[0]:
+            continue
+        pms_list.append({
+            "order": row[15] if len(row) > 15 else "",
+            "ext_order": row[16] if len(row) > 16 else "",
+            "amount": row[5] if len(row) > 5 else 0,
+            "room": row[4] if len(row) > 4 else "",
+            "remark": row[11] if len(row) > 11 else "",
+            "transfer_note": row[12] if len(row) > 12 else "",
+        })
+
+    # ---------- 财务总对账 sheet（作为OTA主表）----------
+    ota_list = []
+    ws = wb["财务总对账"]
+    for row in ws.iter_rows(min_row=3, values_only=True):
+        oid = row[0]
+        if not oid or str(oid) in ("订单号", "总计"):
+            continue
+        ota_list.append({
+            "order_id": oid,
+            "identify_no": row[2] if len(row) > 2 else "",
+            "pay_type": row[10] if len(row) > 10 else "",
+            "settle_amount": row[27] if len(row) > 27 else 0,
+            "card_pay_amount": row[22] if len(row) > 22 else 0,
+        })
+
+    # ---------- 储值卡消费对账 sheet ----------
+    card_list = []
+    ws = wb["储值卡消费对账"]
+    for row in ws.iter_rows(min_row=3, values_only=True):
+        oid = row[0]
+        if not oid or str(oid) in ("订单号", "总计"):
+            continue
+        card_list.append({
+            "order_id": oid,
+            "identify_no": row[2] if len(row) > 2 else "",
+            "card_amount": row[11] if len(row) > 11 else 0,
+        })
+
+    wb.close()
+    return ota_list, card_list, pms_list
+
+
+
 
 
 

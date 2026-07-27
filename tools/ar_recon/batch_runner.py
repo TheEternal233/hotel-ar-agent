@@ -3,10 +3,11 @@ from datetime import datetime
 
 import openpyxl
 
-from tools.ar_recon import _match_ota_rezen_fnb, _match_ota_rezen, FNB_CHANNELS
+from tools.ar_recon import _match_ota_rezen_fnb, _match_ota_rezen, FNB_CHANNELS, match_xiangminiao
 from enums.common_enum import YELLOW_FILL, THIN_BORDER, HEADER_FILL, BASE_DIR,  OUT_DIR, HEADER_FONT
-from tools.ar_recon.report_generator import _generate_report, _generate_ar_report_fnb
+from tools.ar_recon.report_generator import _generate_report, _generate_ar_report_fnb, _generate_ar_report
 from tools.doc_parser import detect_ota_channel, read_ota_channel, read_rezen
+from utils.ar_recon_utils import read_xiangminiao
 
 
 def batch_ota_recon(data_dir=None):
@@ -33,6 +34,26 @@ def batch_ota_recon(data_dir=None):
         ota_path = os.path.join(data_dir, ota_file)
         ota_base = os.path.splitext(ota_file)[0]
         # Strip trailing digits for files like 飞猪1, 飞猪2
+        channel = detect_ota_channel(ota_path)
+        if channel is None or channel == "rezen":
+            continue
+
+        if channel == "向蜜鸟":  # <--
+            try:  # <--
+                ota_records, card_records, rezen_records = read_xiangminiao(ota_path)
+            except Exception as e:
+                all_stats.append(f"向蜜鸟({ota_file}): 读取失败 - {e}")
+                continue
+            results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
+            report_path = _generate_report(results, stats, channel, ota_path, ota_path)
+            all_stats.append({
+                "channel": channel,
+                "file": ota_file,
+                "stats": stats,
+                "report": report_path,
+            })
+            all_reports.append(report_path)
+            continue
         import re
         ota_clean = re.sub(r'[0-9]+$', '', ota_base).strip()
         matched_rezen = None
@@ -51,9 +72,7 @@ def batch_ota_recon(data_dir=None):
             continue
         rezen_path = os.path.join(data_dir, matched_rezen)
 
-        channel = detect_ota_channel(ota_path)
-        if channel is None or channel == "rezen":
-            continue
+
 
         try:
             ota_records = read_ota_channel(ota_path, channel)
@@ -68,7 +87,7 @@ def batch_ota_recon(data_dir=None):
             report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, rezen_path)
         else:
             results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-            report_path = _generate_report(results, stats, channel, ota_path, rezen_path)
+            report_path = _generate_ar_report(results, stats, channel, ota_path, rezen_path)
         all_stats.append({
             "channel": channel,
             "file": ota_file,

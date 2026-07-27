@@ -2,10 +2,12 @@ import os
 from langchain.tools import tool
 from tools.ar_recon.constants import FNB_CHANNELS
 from enums.common_enum import OUT_DIR
-from tools.ar_recon.matcher import _match_ota_rezen, _match_ota_rezen_fnb
+from tools.ar_recon.matcher import _match_ota_rezen, _match_ota_rezen_fnb, match_xiangminiao
 from tools.ar_recon.batch_runner import batch_ota_recon
-from tools.ar_recon.report_generator import _generate_ar_report_fnb, _generate_report
+from tools.ar_recon.report_generator import _generate_ar_report_fnb, _generate_report, _generate_ar_report
 from tools.doc_parser import read_ota_channel, read_rezen, detect_ota_channel
+from utils.ar_recon_utils import read_xiangminiao
+
 os.makedirs(OUT_DIR, exist_ok=True)
 
 @tool
@@ -33,17 +35,26 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
             return f"无法自动检测渠道，请手动指定 channel 参数。"
 
     try:
-        ota_records = read_ota_channel(ota_path, channel)
-        rezen_records = read_rezen(pms_path)
+        if channel == "向蜜鸟":
+            # 两张路径指向同一个4-sheet文件
+            target = ota_path if os.path.exists(ota_path) else pms_path
+            ota_records, card_records, rezen_records = read_xiangminiao(target)
+            results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
+            report_path = _generate_report(results, stats, channel, ota_path, pms_path)
+        elif channel in FNB_CHANNELS:
+            ota_records = read_ota_channel(ota_path, channel)
+            rezen_records = read_rezen(pms_path)
+            results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
+            report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, pms_path)
+        else:
+            ota_records = read_ota_channel(ota_path, channel)
+            rezen_records = read_rezen(pms_path)
+            results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
+            report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
     except Exception as e:
         return f"读取文件失败: {e}"
 
-    if channel in FNB_CHANNELS:
-        results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
-        report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, pms_path)
-    else:
-        results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-        report_path = _generate_report(results, stats, channel, ota_path, pms_path)
+
 
     return (
         f"OTA对账完成 [{channel}]\n"

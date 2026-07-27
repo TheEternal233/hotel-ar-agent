@@ -1,8 +1,3 @@
-import os
-
-from openpyxl.styles import PatternFill, Font, Border
-from websockets import Side
-
 CHANNEL_NAMES = {
     "携程客房": "携程客房", "携程餐饮": "携程餐饮",
     "美团客房": "美团客房", "美团餐饮": "美团餐饮",

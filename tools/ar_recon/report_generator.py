@@ -116,7 +116,7 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
     out_path = os.path.join(OUT_DIR, f"OTA对账_{cname}_{now}.xlsx")
 
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # 删除默认 sheet
+    wb.remove(wb.active)
 
     # ---------- 复制 PMS 源文件 ----------
     pms_wb = openpyxl.load_workbook(pms_path, data_only=False)
@@ -134,7 +134,7 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
     ws_sum = wb.create_sheet("对账汇总")
     row = 1
 
-    # 1) 汇总统计区
+
     info = [
         ("渠道", channel_name),
         ("OTA文件", os.path.basename(ota_path)),
@@ -159,9 +159,9 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
             c.fill = RED_FILL
         row += 1
 
-    row += 1  # 空行
+    row += 1
 
-    # 2) 差额明细区
+
     ws_sum.cell(row=row, column=1, value="差额明细（仅展示未匹配/有差异的记录）").font = Font(bold=True, size=12)
     row += 1
     hdrs_diff = ["OTA订单号", "PMS外部订单号", "OTA金额", "PMS金额", "差额", "状态", "房号", "PMS备注"]
@@ -195,9 +195,9 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
                 c.fill = YELLOW_FILL
         row += 1
 
-    row += 1  # 空行
+    row += 1
 
-    # 3) 全额对比区
+
     ws_sum.cell(row=row, column=1, value="全额对比（含匹配记录）").font = Font(bold=True, size=12)
     row += 1
     hdrs_full = ["状态", "OTA订单号", "PMS外部订单号", "OTA金额", "PMS金额", "差额", "房号"]
@@ -235,17 +235,13 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
     return out_path
 
 def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
-    """餐饮渠道专用报告：按售价/卖价金额统计数量并比对。
 
-    输出结构仍为：PMS 源文件 + OTA 原文件 + 对账汇总。
-    对账汇总中按金额分组，展示 OTA/PMS 各自的数量、金额及差异。
-    """
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     cname = channel_name.replace("·", "_")
     out_path = os.path.join(OUT_DIR, f"OTA对账_{cname}_{now}.xlsx")
 
     wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # 删除默认 sheet
+    wb.remove(wb.active)
 
     # ---------- 复制 PMS 源文件 ----------
     pms_wb = openpyxl.load_workbook(pms_path, data_only=False)
@@ -263,7 +259,7 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
     ws_sum = wb.create_sheet("对账汇总")
     row = 1
 
-    # 1) 汇总统计区
+
     info = [
         ("渠道", channel_name),
         ("OTA文件", os.path.basename(ota_path)),
@@ -288,9 +284,9 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
             c.fill = RED_FILL
         row += 1
 
-    row += 1  # 空行
+    row += 1
 
-    # 2) 差额明细区（仅展示数量不一致或单边存在的金额）
+
     ws_sum.cell(row=row, column=1, value="差额明细（按金额分组，仅展示数量不一致的记录）").font = Font(bold=True, size=12)
     row += 1
     hdrs_diff = ["金额", "OTA数量", "PMS数量", "数量差异", "OTA金额", "PMS金额", "金额差异", "状态", "OTA券号", "PMS结账单号"]
@@ -325,9 +321,9 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
                 c.fill = YELLOW_FILL
         row += 1
 
-    row += 1  # 空行
+    row += 1
 
-    # 3) 全额对比区（含数量匹配的记录）
+
     ws_sum.cell(row=row, column=1, value="全额对比（含数量匹配记录）").font = Font(bold=True, size=12)
     row += 1
     hdrs_full = ["状态", "金额", "OTA数量", "PMS数量", "数量差异", "OTA金额", "PMS金额", "金额差异", "OTA券号", "PMS结账单号"]
