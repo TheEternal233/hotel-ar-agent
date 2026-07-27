@@ -265,7 +265,7 @@ OTA_CHANNEL_MAPPINGS = {
             "revenue_time": ["收益时间"],
             "order_time": ["下单时间"],
             "consume_time": ["消费时间"],
-            "sell_price": ["售价"],
+            "sell_price": ["售价（美团售价）"],
             "product_name": ["产品名称"],
         },
         "order_id_col": "order_id",

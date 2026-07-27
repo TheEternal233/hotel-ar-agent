@@ -4,17 +4,16 @@
 匹配策略：订单号精匹配 / 券号间接匹配 / 金额+日期模糊匹配
 """
 
-import os, json
+import os
 from datetime import datetime
 from langchain.tools import tool
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Border, Side
-from enums.excel_style import HEADER_FILL, HEADER_FONT, THIN_BORDER, RED_FILL, GREEN_FILL, YELLOW_FILL, OUT_DIR, \
+from openpyxl.styles import Font
+from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER, RED_FILL, GREEN_FILL, YELLOW_FILL, OUT_DIR, \
     BASE_DIR
+from utils.common_func import _norm_orderno, _norm_amount
 from tools.doc_parser import read_ota_channel, read_rezen, detect_ota_channel, OTA_CHANNEL_MAPPINGS
-from utils.ar_recon_utils import _generate_ar_report
-
-
+from utils.ar_recon_utils import _generate_ar_report, _match_ota_rezen_fnb, _generate_ar_report_fnb
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -26,18 +25,8 @@ CHANNEL_NAMES = {
     "飞猪": "飞猪", "抖音": "抖音", "向蜜鸟": "向蜜鸟",
 }
 
-def _norm_orderno(oid):
-    if oid is None:
-        return ""
-    return str(oid).strip().replace("\n", "").replace("\r", "").replace(" ", "")
+FNB_CHANNELS = {"美团餐饮", "携程餐饮"}
 
-def _norm_amount(v):
-    if v is None:
-        return 0.0
-    try:
-        return round(float(v), 2)
-    except (ValueError, TypeError):
-        return 0.0
 
 def _match_ota_rezen(ota_records, rezen_records, channel_name):
     oci = OTA_CHANNEL_MAPPINGS.get(channel_name, {})
@@ -335,8 +324,13 @@ def batch_ota_recon(data_dir=None):
             all_stats.append(f"{channel}({ota_file}): 读取失败 - {e}")
             continue
 
-        results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-        report_path = _generate_report(results, stats, channel, ota_path, rezen_path)
+        # 餐饮渠道走数量统计匹配，其他渠道走订单号匹配
+        if channel in FNB_CHANNELS:
+            results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
+            report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, rezen_path)
+        else:
+            results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
+            report_path = _generate_report(results, stats, channel, ota_path, rezen_path)
         all_stats.append({
             "channel": channel,
             "file": ota_file,
@@ -426,8 +420,13 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
     except Exception as e:
         return f"读取文件失败: {e}"
 
-    results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-    report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
+    # 餐饮渠道按金额数量统计匹配，其他渠道按订单号匹配
+    if channel in FNB_CHANNELS:
+        results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
+        report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, pms_path)
+    else:
+        results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
+        report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
 
     return (
         f"OTA对账完成 [{channel}]\n"
