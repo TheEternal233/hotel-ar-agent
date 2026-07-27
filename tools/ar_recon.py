@@ -9,20 +9,16 @@ from datetime import datetime
 from langchain.tools import tool
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side
-
+from enums.excel_style import HEADER_FILL, HEADER_FONT, THIN_BORDER, RED_FILL, GREEN_FILL, YELLOW_FILL, OUT_DIR, \
+    BASE_DIR
 from tools.doc_parser import read_ota_channel, read_rezen, detect_ota_channel, OTA_CHANNEL_MAPPINGS
+from utils.ar_recon_utils import _generate_ar_report
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_DIR = os.path.join(BASE_DIR, "output")
+
+
 os.makedirs(OUT_DIR, exist_ok=True)
 
-HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-HEADER_FONT = Font(color="FFFFFF", bold=True)
-THIN_BORDER = Border(left=Side(style="thin"), right=Side(style="thin"),
-                     top=Side(style="thin"), bottom=Side(style="thin"))
-RED_FILL = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
-GREEN_FILL = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")
-YELLOW_FILL = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
+
 
 CHANNEL_NAMES = {
     "携程客房": "携程客房", "携程餐饮": "携程餐饮",
@@ -431,7 +427,7 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
         return f"读取文件失败: {e}"
 
     results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-    report_path = _generate_report(results, stats, channel, ota_path, pms_path)
+    report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
 
     return (
         f"OTA对账完成 [{channel}]\n"

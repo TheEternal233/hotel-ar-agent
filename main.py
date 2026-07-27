@@ -12,7 +12,7 @@ def main():
     p.add_argument("--serve", action="store_true")
     args = p.parse_args()
     if args.serve:
-        import uvicorn; uvicorn.run("serve:app", host="127.0.0.1", port=8000, reload=True)
+        import uvicorn; uvicorn.run("serve:app", host="127.0.0.1", port=9000, reload=True)
     elif args.task:
         g = build_graph()
         prompt = args.task
