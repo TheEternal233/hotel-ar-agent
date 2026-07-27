@@ -1,6 +1,6 @@
 import os
 
-from openpyxl.styles import Font, PatternFill, Border, Side
+from openpyxl.styles import Border, PatternFill, Font, Side
 
 HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
