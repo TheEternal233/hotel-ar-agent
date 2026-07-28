@@ -11,11 +11,20 @@ from enums.common_enum import (
 from utils.ar_recon_utils import _copy_sheet_to_wb
 
 
+REPORT_FILENAME_FMT = "OTA对账_{}_{}.xlsx"
+XIANGMINIAO_OTA_SHEET = "财务总对账"
+SHEET_SUMMARY = "对账汇总"
+SHEET_DIFF = "差额明细"
+SHEET_FULL = "全额对比"
+STATUS_MATCH = "match"
+STATUS_DIFF = "diff"
+STATUS_OTA_ONLY = "ota_only"
+STATUS_PMS_ONLY = "pms_only"
 
 def _make_out_path(channel_name):
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     cname = channel_name.replace("·", "_")
-    return os.path.join(OUT_DIR, f"OTA对账_{cname}_{now}.xlsx")
+    return os.path.join(OUT_DIR, REPORT_FILENAME_FMT.format(cname, now))
 
 
 def _init_workbook(ar_mode=False, ota_path=None, pms_path=None):
@@ -28,7 +37,7 @@ def _init_workbook(ar_mode=False, ota_path=None, pms_path=None):
     if ota_path == pms_path:
         src_wb = openpyxl.load_workbook(ota_path, data_only=False)
         for ws in src_wb.worksheets:
-            new_title = "OTA" if ws.title == "财务总对账" else None
+            new_title = "OTA" if ws.title == XIANGMINIAO_OTA_SHEET else None
             _copy_sheet_to_wb(ws, wb, title=new_title)
         src_wb.close()
     else:
@@ -67,11 +76,11 @@ def _write_headers(ws, row, headers):
 
 
 def _apply_status_color(cell, status):
-    if status == "match":
+    if status == STATUS_MATCH:
         cell.fill = GREEN_FILL
-    elif status == "diff":
+    elif status == STATUS_DIFF:
         cell.fill = RED_FILL
-    elif status in ("ota_only", "pms_only"):
+    elif status in (STATUS_OTA_ONLY,STATUS_MATCH):
         cell.fill = YELLOW_FILL
 
 
@@ -79,7 +88,7 @@ def _write_data_rows(ws, start_row, results, cols_fn, skip_match=False):
     """通用数据行写入，按状态着色，返回下一行号"""
     row = start_row
     for r in results:
-        if skip_match and r["status"] == "match":
+        if skip_match and r["status"] == STATUS_MATCH:
             continue
         for j, v in enumerate(cols_fn(r), 1):
             c = ws.cell(row=row, column=j, value=v)
@@ -194,14 +203,14 @@ def _generate_report(results, stats, channel_name, ota_path, pms_path):
     wb = _init_workbook()
 
     ws1 = wb.active
-    ws1.title = "对账汇总"
+    ws1.title = SHEET_SUMMARY
     _write_summary_block(ws1, 1, _build_std_info(results, stats, channel_name, ota_path, pms_path), _std_red_check)
 
-    ws2 = wb.create_sheet("差额明细")
+    ws2 = wb.create_sheet(SHEET_DIFF)
     _write_headers(ws2, 1, _STD_DIFF_HDRS)
     _write_data_rows(ws2, 2, results, _std_diff_cols, skip_match=True)
 
-    ws3 = wb.create_sheet("全额对比")
+    ws3 = wb.create_sheet(SHEET_FULL)
     _write_headers(ws3, 1, _STD_FULL_HDRS)
     _write_data_rows(ws3, 2, results, _std_full_cols, skip_match=False)
 
@@ -212,7 +221,7 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
     out_path = _make_out_path(channel_name)
     wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
 
-    ws = wb.create_sheet("对账汇总")
+    ws = wb.create_sheet(SHEET_SUMMARY)
     row = _write_summary_block(ws, 1, _build_std_info(results, stats, channel_name, ota_path, pms_path), _std_red_check)
 
     row += 1
@@ -232,7 +241,7 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
     out_path = _make_out_path(channel_name)
     wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
 
-    ws = wb.create_sheet("对账汇总")
+    ws = wb.create_sheet(SHEET_SUMMARY)
     row = _write_summary_block(ws, 1, _build_fnb_info(results, stats, channel_name, ota_path, pms_path), _fnb_red_check)
 
     row += 1

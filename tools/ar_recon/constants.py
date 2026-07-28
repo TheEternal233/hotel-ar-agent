@@ -5,3 +5,8 @@ CHANNEL_NAMES = {
 }
 
 FNB_CHANNELS = {"美团餐饮", "携程餐饮"}
+
+
+AMOUNT_TOLERANCE = 0.02      # 金额匹配容差（订单号/识别号精确匹配）
+DIFF_TOLERANCE = 0.02        # 差额判定容差
+MAX_AMOUNT_DIFF = 5.0        # 无单号时金额兜底最大差异

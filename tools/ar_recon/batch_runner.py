@@ -9,16 +9,24 @@ from tools.ar_recon.report_generator import _generate_report, _generate_ar_repor
 from tools.doc_parser import detect_ota_channel, read_ota_channel, read_rezen
 from utils.ar_recon_utils import read_xiangminiao
 
+SUPPORTED_EXTS = (".xlsx", ".xls")
+PMS_MARKER = "rezen"
+DEFAULT_DATA_SUBDIR = ("data", "清远", "OTA对账")
+SUMMARY_FILENAME_FMT = "OTA对账_全部汇总_{}.xlsx"
+SUMMARY_SHEET_NAME = "渠道汇总"
+SUMMARY_HEADERS = ["渠道", "OTA文件", "OTA记录", "PMS记录", "匹配", "差异", "仅OTA", "仅PMS", "报告文件"]
+HIGHLIGHT_COLS = {5, 6, 7, 8}
+PREFIX_MATCH_LEN = 2
 
 def batch_ota_recon(data_dir=None):
     if data_dir is None:
-        data_dir = os.path.join(BASE_DIR, "data", "清远", "OTA对账")
+        data_dir = os.path.join(BASE_DIR, *DEFAULT_DATA_SUBDIR)
     if not os.path.exists(data_dir):
         return f"错误：数据目录不存在: {data_dir}"
 
-    files = [f for f in os.listdir(data_dir) if f.endswith((".xlsx", ".xls"))]
-    rezen_files = [f for f in files if "rezen" in f.lower()]
-    ota_files = [f for f in files if "rezen" not in f.lower()]
+    files = [f for f in os.listdir(data_dir) if f.endswith(SUPPORTED_EXTS)]
+    rezen_files = [f for f in files if PMS_MARKER in f.lower()]
+    ota_files = [f for f in files if PMS_MARKER not in f.lower()]
 
     all_stats = []
     all_reports = []
@@ -27,7 +35,7 @@ def batch_ota_recon(data_dir=None):
     rezen_lookup = {}
     for rf in rezen_files:
         rf_base = os.path.splitext(rf)[0]
-        rf_clean = rf_base.replace("rezen", "").replace("·", "").rstrip("0123456789")
+        rf_clean = rf_base.replace(PMS_MARKER, "").replace("·", "").rstrip("0123456789")
         rezen_lookup[rf_clean] = rf
 
     for ota_file in ota_files:
@@ -45,7 +53,7 @@ def batch_ota_recon(data_dir=None):
                 all_stats.append(f"向蜜鸟({ota_file}): 读取失败 - {e}")
                 continue
             results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
-            report_path = _generate_report(results, stats, channel, ota_path, ota_path)
+            report_path = _generate_ar_report(results, stats, channel, ota_path, ota_path)
             all_stats.append({
                 "channel": channel,
                 "file": ota_file,
@@ -65,7 +73,7 @@ def batch_ota_recon(data_dir=None):
             # Try exact prefix match
             for rf in rezen_files:
                 rf_base = os.path.splitext(rf)[0]
-                if ota_base[:2] in rf_base and "rezen" in rf_base.lower():
+                if ota_base[:PREFIX_MATCH_LEN] in rf_base and PMS_MARKER in rf_base.lower():
                     matched_rezen = rf
                     break
         if matched_rezen is None:
@@ -97,11 +105,11 @@ def batch_ota_recon(data_dir=None):
         all_reports.append(report_path)
 
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    summary_path = os.path.join(OUT_DIR, f"OTA对账_全部汇总_{now}.xlsx")
+    summary_path = os.path.join(OUT_DIR, SUMMARY_FILENAME_FMT.format(now))
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "渠道汇总"
-    hdrs = ["渠道", "OTA文件", "OTA记录", "PMS记录", "匹配", "差异", "仅OTA", "仅PMS", "报告文件"]
+    ws.title = SUMMARY_SHEET_NAME
+    hdrs = SUMMARY_HEADERS
     for j, h in enumerate(hdrs, 1):
         c = ws.cell(row=1, column=j, value=h)
         c.fill = HEADER_FILL
@@ -119,7 +127,7 @@ def batch_ota_recon(data_dir=None):
         for j, v in enumerate(vals, 1):
             c = ws.cell(row=i, column=j, value=v)
             c.border = THIN_BORDER
-            if j in (5, 6, 7, 8) and isinstance(v, (int, float)) and v > 0:
+            if j in HIGHLIGHT_COLS and isinstance(v, (int, float)) and v > 0:
                 c.fill = YELLOW_FILL
     wb.save(summary_path)
     wb.close()

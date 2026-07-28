@@ -1,3 +1,4 @@
+from tools.ar_recon.constants import AMOUNT_TOLERANCE, MAX_AMOUNT_DIFF, DIFF_TOLERANCE
 from tools.doc_parser import OTA_CHANNEL_MAPPINGS
 from utils.common_func import _norm_amount, _norm_orderno
 
@@ -17,7 +18,7 @@ def _build_pms_order_index(pms_list):
     return by_ext, by_order
 
 
-def _match_by_order_id(oid, amt, pms_list, by_ext, by_order, used, amount_tol=0.02):
+def _match_by_order_id(oid, amt, pms_list, by_ext, by_order, used, amount_tol=AMOUNT_TOLERANCE):
     """按订单号匹配：先金额一致，再仅订单号"""
     if not oid:
         return -1
@@ -36,7 +37,7 @@ def _match_by_order_id(oid, amt, pms_list, by_ext, by_order, used, amount_tol=0.
     return -1
 
 
-def _match_by_identify(identify, amt, pms_list, used, amount_tol=0.02):
+def _match_by_identify(identify, amt, pms_list, used, amount_tol=AMOUNT_TOLERANCE):
     """按 identify_no 模糊匹配：先金额+identify，再仅identify"""
     if not identify:
         return -1
@@ -60,7 +61,7 @@ def _match_by_identify(identify, amt, pms_list, used, amount_tol=0.02):
     return -1
 
 
-def _match_by_amount(amt, pms_list, used, max_diff=5.0):
+def _match_by_amount(amt, pms_list, used, max_diff=MAX_AMOUNT_DIFF):
     """无订单号时按金额模糊匹配"""
     if amt <= 0:
         return -1
@@ -109,11 +110,11 @@ def _append_unmatched_pms(results, pms_list, used):
             })
 
 
-def _calc_stats(results):
+def _calc_stats(results, total_ota=None, total_pms=None):
     """从结果列表计算统计"""
     return {
-        "total_ota": sum(1 for r in results if r["ota"] is not None),
-        "total_pms": sum(1 for r in results if r["pms"] is not None),
+        "total_ota": total_ota if total_ota is not None else sum(1 for r in results if r["ota"] is not None),
+        "total_pms": total_pms if total_pms is not None else sum(1 for r in results if r["pms"] is not None),
         "match": sum(1 for r in results if r["status"] == "match"),
         "diff": sum(1 for r in results if r["status"] == "diff"),
         "ota_only": sum(1 for r in results if r["status"] == "ota_only"),
@@ -156,7 +157,7 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
             rezen_matched.add(ri)
             ramt = _norm_amount(rezen_records[ri].get("amount", 0))
             diff = round(oamt - ramt, 2)
-            status = "match" if abs(diff) < 0.02 else "diff"
+            status = "match" if abs(diff) < DIFF_TOLERANCE else "diff"
             results.append(_make_result(
                 status, ota, rezen_records[ri], oamt, ramt, oid,
                 _norm_orderno(rezen_records[ri].get("ext_order", ""))
@@ -165,9 +166,7 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
             results.append(_make_result("ota_only", ota, None, oamt, 0, oid, ""))
 
     _append_unmatched_pms(results, rezen_records, rezen_matched)
-    stats = _calc_stats(results)
-    stats["total_ota"] = len(ota_records)
-    stats["total_pms"] = len(rezen_records)
+    stats = _calc_stats(results,len(ota_records),len(rezen_records))
     return results, stats
 
 
@@ -272,7 +271,7 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
             pms_amt = _norm_amount(pms_list[idx].get("amount", 0))
             diff = round(amt - pms_amt, 2)
             is_card_full = ("储值" in pay_type and pms_amt == 0 and amt > 0)
-            status = "match" if (abs(diff) < 0.02 or is_card_full) else "diff"
+            status = "match" if (abs(diff) < DIFF_TOLERANCE or is_card_full) else "diff"
             results.append(_make_result(
                 status, ota, pms_list[idx], amt, pms_amt, oid,
                 _norm_orderno(pms_list[idx].get("ext_order", ""))
@@ -281,4 +280,4 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
             results.append(_make_result("ota_only", ota, None, amt, 0, oid, ""))
 
     _append_unmatched_pms(results, pms_list, used)
-    return results, _calc_stats(results)
+    return results, _calc_stats(results,len(ota_list),len(pms_list))
