@@ -379,33 +379,34 @@ def read_ota_channel(path, channel_name, sheet_name=None):
 
 
 def detect_ota_channel(path):
-    _, ws = _open(path)
+    wb, ws = _open(path)
     headers = _get_headers(ws, 1)
     headers_str = " ".join(str(h) for h in headers if h)
 
     rezen_markers = ["账单号", "外部订单号", "协议单位"]
     rezen_score = sum(1 for m in rezen_markers if m in headers_str)
     if rezen_score >= 2:
-        ws.parent.close()
+        wb.close()
         return "rezen"
 
+    if "财务总对账" in wb.sheetnames and "PMS" in wb.sheetnames:
+        wb.close()
+        return "向蜜鸟"
+
     if "美团订单号" in headers_str:
-        ws.parent.close()
+        wb.close()
         return "美团客房"
     if "券号" in headers_str and "美食林券号" in headers_str:
-        ws.parent.close()
+        wb.close()
         return "携程餐饮"
     if "券号" in headers_str and "订单号" in headers_str and "售价" in headers_str:
-        ws.parent.close()
+        wb.close()
         return "美团餐饮"
     if "核销时间" in headers_str and "订单编号" in headers_str:
-        ws.parent.close()
+        wb.close()
         return "抖音"
-    if "流水号" in headers_str and "识别号" in headers_str:
-        ws.parent.close()
-        return "向蜜鸟"
     if "套餐订单号" in headers_str or ("订单号" in headers_str and "入住人" in headers_str):
-        ws.parent.close()
+        wb.close()
         return "飞猪"
 
     # Check for 携程客房 (header in row 2)
@@ -413,8 +414,8 @@ def detect_ota_channel(path):
         row2 = [c.value for c in next(ws.iter_rows(min_row=2, max_row=2))]
         row2_str = " ".join(str(v) for v in row2 if v)
         if "订单号" in row2_str and "结算价" in row2_str:
-            ws.parent.close()
+            wb.close()
             return "携程客房"
 
-    ws.parent.close()
+    wb.close()
     return None

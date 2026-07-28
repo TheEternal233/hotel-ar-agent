@@ -22,13 +22,9 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
     stats = {"total_ota": len(ota_records), "total_pms": len(rezen_records),
              "match": 0, "diff": 0, "ota_only": 0, "pms_only": 0}
 
-    # 向蜜鸟特殊：识别号匹配 + 储值卡兜底
-    is_xiangminiao = channel_name == "向蜜鸟"
-
     for ota in ota_records:
         oid = _norm_orderno(ota.get(oid_col, ""))
         oamt = _norm_amount(ota.get(amt_col, 0))
-        identify_no = _norm_orderno(ota.get("identify_no", "")) if is_xiangminiao else ""
 
         found = False
         ri = -1
@@ -53,34 +49,7 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
                     found = True
                     break
 
-        # 向蜜鸟特殊策略B: 识别号(短码)匹配
-        if not found and is_xiangminiao and identify_no:
-            for ci in range(len(rezen_records)):
-                if ci in rezen_matched:
-                    continue
-                rext = _norm_orderno(rezen_records[ci].get("ext_order", ""))
-                rorder = _norm_orderno(rezen_records[ci].get("order", ""))
-                # 识别号可能在外部订单号或订单号字段中
-                if identify_no in rext or identify_no in rorder:
-                    ramt = _norm_amount(rezen_records[ci].get("amount", 0))
-                    if abs(oamt - ramt) < 0.02:
-                        ri = ci
-                        found = True
-                        break
-
-        # 向蜜鸟特殊策略C: 储值卡消费（OTA金额为0时直接匹配识别号）
-        if not found and is_xiangminiao and oamt == 0 and identify_no:
-            for ci in range(len(rezen_records)):
-                if ci in rezen_matched:
-                    continue
-                rorder = _norm_orderno(rezen_records[ci].get("order", ""))
-                rext = _norm_orderno(rezen_records[ci].get("ext_order", ""))
-                if identify_no in rorder or identify_no in rext:
-                    ri = ci
-                    found = True
-                    break
-
-        if not found and not oid and not identify_no and oamt > 0:  # 必须没有订单号才允许金额兜底
+        if not found and not oid and oamt > 0:
             best_ci = -1
             best_diff = float("inf")
             for ci in range(len(rezen_records)):
@@ -255,21 +224,25 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
         pay_type = str(ota.get("pay_type", ""))
 
         # 取OTA金额：储值卡优先读储值卡消费金额，否则读结算金额
-        if "储值" in pay_type:
+        settle_amt= _norm_amount(ota.get("settle_amount", 0))
+
+        if "储值" in pay_type or settle_amt == 0:
             amt = _norm_amount(ota.get("card_pay_amount", 0))
             if amt == 0 and oid in card_map:
                 amt = _norm_amount(card_map[oid].get("card_amount", 0))
             if amt == 0:
-                amt = _norm_amount(ota.get("settle_amount", 0))
+                amt = settle_amt
+            if amt == 0:
+                amt= _norm_amount(ota.get("actual_amount", 0))
         else:
-            amt = _norm_amount(ota.get("settle_amount", 0))
+            amt = settle_amt
             if amt == 0:
                 amt = _norm_amount(ota.get("actual_settle", 0))
 
         found = False
         idx = -1
 
-        # 1) 订单号精确匹配：先找金额一致的，找不到就挂差异
+
         if oid:
             cands = pms_by_ext.get(oid, []) + pms_by_order.get(oid, [])
             for i in cands:
@@ -287,7 +260,7 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
                     found = True
                     break
 
-        # 2) 识别号（券号短码）匹配：用于6.18元这类券消费，PMS里可能没有完整订单号
+
         if not found and identify:
             for i in range(len(pms_list)):
                 if i in used:
@@ -299,7 +272,7 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
                         idx = i
                         found = True
                         break
-            # 识别号对上了但金额差一些，也先挂上，标记为diff
+
             if not found:
                 for i in range(len(pms_list)):
                     if i in used:
@@ -311,7 +284,7 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
                         found = True
                         break
 
-        # 3) 兜底：没单号、没识别号时，±5元模糊匹配
+
         if not found and amt > 0 and not oid and not identify:
             best_i = -1
             best_d = 999999
@@ -329,13 +302,14 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
                 idx = best_i
                 found = True
 
-        # 写结果
+
         if found:
             used.add(idx)
             pms_amt = _norm_amount(pms_list[idx].get("amount", 0))
             diff = round(amt - pms_amt, 2)
+            is_card_full=("储值" in pay_type and pms_amt ==0 and amt > 0)
             out.append({
-                "status": "match" if abs(diff) < 0.02 else "diff",
+                "status": "match" if (abs(diff) < 0.02 or is_card_full) else "diff",
                 "ota": ota,
                 "pms": pms_list[idx],
                 "ota_amount": amt,
@@ -356,7 +330,7 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
                 "pms_ext_order": "",
             })
 
-    # pms剩余未匹配
+
     for i, p in enumerate(pms_list):
         if i not in used:
             out.append({

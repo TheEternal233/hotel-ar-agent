@@ -38,8 +38,8 @@ def batch_ota_recon(data_dir=None):
         if channel is None or channel == "rezen":
             continue
 
-        if channel == "向蜜鸟":  # <--
-            try:  # <--
+        if channel == "向蜜鸟":
+            try:
                 ota_records, card_records, rezen_records = read_xiangminiao(ota_path)
             except Exception as e:
                 all_stats.append(f"向蜜鸟({ota_file}): 读取失败 - {e}")

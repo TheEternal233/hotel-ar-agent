@@ -40,7 +40,7 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
             target = ota_path if os.path.exists(ota_path) else pms_path
             ota_records, card_records, rezen_records = read_xiangminiao(target)
             results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
-            report_path = _generate_report(results, stats, channel, ota_path, pms_path)
+            report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
         elif channel in FNB_CHANNELS:
             ota_records = read_ota_channel(ota_path, channel)
             rezen_records = read_rezen(pms_path)

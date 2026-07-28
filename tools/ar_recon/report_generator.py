@@ -117,18 +117,24 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
+    if ota_path==pms_path:
+        src_wb=openpyxl.load_workbook(ota_path,data_only=False)
+        for ws in src_wb.worksheets:
+            new_title="OTA" if ws.title=="财务总对账" else None
+            _copy_sheet_to_wb(ws,wb,title=new_title)
+        src_wb.close()
+    else:
+        # ---------- 复制 PMS 源文件 ----------
+        pms_wb = openpyxl.load_workbook(pms_path, data_only=False)
+        for idx, ws in enumerate(pms_wb.worksheets):
+            _copy_sheet_to_wb(ws, wb, title="PMS" if idx==0 else None)
+        pms_wb.close()
 
-    # ---------- 复制 PMS 源文件 ----------
-    pms_wb = openpyxl.load_workbook(pms_path, data_only=False)
-    for idx, ws in enumerate(pms_wb.worksheets):
-        _copy_sheet_to_wb(ws, wb, title="PMS" if idx==0 else None)
-    pms_wb.close()
-
-    # ---------- 复制 OTA 原文件 ----------
-    ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
-    for idx, ws in enumerate(ota_wb.worksheets):
-        _copy_sheet_to_wb(ws, wb, title="OTA" if idx==0 else None)
-    ota_wb.close()
+        # ---------- 复制 OTA 原文件 ----------
+        ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        for idx, ws in enumerate(ota_wb.worksheets):
+            _copy_sheet_to_wb(ws, wb, title="OTA" if idx==0 else None)
+        ota_wb.close()
 
     # ---------- 对账汇总 ----------
     ws_sum = wb.create_sheet("对账汇总")
