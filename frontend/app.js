@@ -79,21 +79,30 @@
     }
     s.textContent = uploadedFiles.length ? uploadedFiles.length + " 个文件" : "";
     e.target.value = "";
+    uploadedFiles.length = 0;
   }
   window.handleUpload = handleUpload;
 
   // ===== Chat (AI 对话 专用) =====
   function sendMessage() {
     var input = document.getElementById("chatInput"), msg = input.value.trim();
-    if (!msg) return; addMsg("user", msg); input.value = ""; streamChat(msg);
+    if (!msg) return; addMsg("user", msg); input.value = "";
+    var filePaths = uploadedFiles.map(function(f) { return f.path; });
+    streamChat(msg, filePaths);
   }
   window.sendMessage = sendMessage;
 
-  async function streamChat(msg) {
+  async function streamChat(msg, filePaths) {
     addMsg("system", "思考中...", "think");
+    var body = {
+        message: msg,
+        thread_id: "web-" + Date.now(),
+        uploaded_files: filePaths || []
+    };
     var r = await fetch(API + "/chat/stream", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: msg, thread_id: "web-" + Date.now() })
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
     });
     var reader = r.body.getReader(), dec = new TextDecoder(), full = "";
     removeThink();

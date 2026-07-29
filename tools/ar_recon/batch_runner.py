@@ -32,9 +32,10 @@ def batch_ota_recon(data_dir=None):
     all_reports = []
 
     # Build rezen lookup by channel name
+    # 将PMS文件名写成渠道名，方便配对
     rezen_lookup = {}
     for rf in rezen_files:
-        rf_base = os.path.splitext(rf)[0]
+        rf_base = os.path.splitext(rf)[0]   #去掉.xlsx
         rf_clean = rf_base.replace(PMS_MARKER, "").replace("·", "").rstrip("0123456789")
         rezen_lookup[rf_clean] = rf
 
@@ -61,7 +62,7 @@ def batch_ota_recon(data_dir=None):
                 "report": report_path,
             })
             all_reports.append(report_path)
-            continue
+            continue    #跳过后续文件配对逻辑，因为向蜜鸟单个文件，不需要找rezen配对文件
         import re
         ota_clean = re.sub(r'[0-9]+$', '', ota_base).strip()
         matched_rezen = None

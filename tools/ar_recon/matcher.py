@@ -4,7 +4,7 @@ from utils.common_func import _norm_amount, _norm_orderno
 
 
 
-
+# 建反向索引,向蜜鸟可能从这两个字段做匹配
 def _build_pms_order_index(pms_list):
     """按 ext_order / order 构建 PMS 索引"""
     by_ext, by_order = {}, {}
@@ -20,6 +20,12 @@ def _build_pms_order_index(pms_list):
 
 def _match_by_order_id(oid, amt, pms_list, by_ext, by_order, used, amount_tol=AMOUNT_TOLERANCE):
     """按订单号匹配：先金额一致，再仅订单号"""
+    """
+    关于两轮匹配：
+        1.建立索引的函数，返回的数据结构长这样by_ext  = {"A001": [0, 1], "B002": [2]}
+        2.A001对应两个PMS记录，因此要分两轮匹配，先按金额一致，再按订单号。
+        
+    """
     if not oid:
         return -1
     candidates = by_ext.get(oid, []) + by_order.get(oid, [])
@@ -41,7 +47,7 @@ def _match_by_identify(identify, amt, pms_list, used, amount_tol=AMOUNT_TOLERANC
     """按 identify_no 模糊匹配：先金额+identify，再仅identify"""
     if not identify:
         return -1
-    # 第一轮
+    # 第一轮 金额一致
     for i in range(len(pms_list)):
         if i in used:
             continue
@@ -50,7 +56,7 @@ def _match_by_identify(identify, amt, pms_list, used, amount_tol=AMOUNT_TOLERANC
         if identify in ext or identify in od:
             if abs(amt - _norm_amount(pms_list[i].get("amount", 0))) < amount_tol:
                 return i
-    # 第二轮
+    # 第二轮 仅identify
     for i in range(len(pms_list)):
         if i in used:
             continue
@@ -63,6 +69,7 @@ def _match_by_identify(identify, amt, pms_list, used, amount_tol=AMOUNT_TOLERANC
 
 def _match_by_amount(amt, pms_list, used, max_diff=MAX_AMOUNT_DIFF):
     """无订单号时按金额模糊匹配"""
+    # 触发条件： 没有订单号、也没有识别号，只能靠金额碰运气。max_diff=5.0 的阈值意味着金额差超过 5 元就不匹配了。
     if amt <= 0:
         return -1
     best_i, best_d = -1, float("inf")
@@ -96,7 +103,7 @@ def _make_result(status, ota, pms, ota_amt, pms_amt, ota_order, pms_ext_order):
 def _append_unmatched_pms(results, pms_list, used):
     """追加未匹配的 PMS 记录"""
     for i, p in enumerate(pms_list):
-        if i not in used:
+        if i not in used:   # 不在used->未被任何OTA匹配到
             pms_amt = _norm_amount(p.get("amount", 0))
             results.append({
                 "status": "pms_only",
@@ -149,11 +156,15 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
         oid = _norm_orderno(ota.get(oid_col, ""))
         oamt = _norm_amount(ota.get(amt_col, 0))
 
+        # 先走顶单号
         ri = _match_by_order_id(oid, oamt, rezen_records, rezen_by_ext, rezen_by_order, rezen_matched)
+
         if ri < 0 and not oid and oamt > 0:
+            # 没有订单号、也没有识别号，只能靠金额。
             ri = _match_by_amount(oamt, rezen_records, rezen_matched)
 
         if ri >= 0:
+            # 匹配成功->比较金额
             rezen_matched.add(ri)
             ramt = _norm_amount(rezen_records[ri].get("amount", 0))
             diff = round(oamt - ramt, 2)
@@ -163,6 +174,7 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
                 _norm_orderno(rezen_records[ri].get("ext_order", ""))
             ))
         else:
+            # 失败->ota_only
             results.append(_make_result("ota_only", ota, None, oamt, 0, oid, ""))
 
     _append_unmatched_pms(results, rezen_records, rezen_matched)

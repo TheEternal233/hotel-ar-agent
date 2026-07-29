@@ -80,7 +80,7 @@ def _apply_status_color(cell, status):
         cell.fill = GREEN_FILL
     elif status == STATUS_DIFF:
         cell.fill = RED_FILL
-    elif status in (STATUS_OTA_ONLY,STATUS_MATCH):
+    elif status in (STATUS_OTA_ONLY,STATUS_PMS_ONLY):
         cell.fill = YELLOW_FILL
 
 

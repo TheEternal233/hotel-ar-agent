@@ -38,6 +38,7 @@ def _ensure_graph():
 class ChatRequest(BaseModel):
     message: str
     thread_id: str = ""
+    uploaded_files: list[str] = []
 
 class ChatResponse(BaseModel):
     response: str
@@ -111,7 +112,10 @@ async def health():
 async def chat(req: ChatRequest):
     try:
         graph = _ensure_graph()
-        user_input = {"messages": [HumanMessage(content=req.message)]}
+        msg_content = req.message
+        if req.uploaded_files:
+            msg_content = "用户已上传以下文件：\n" + "\n".join(f"  - {f}" for f in req.uploaded_files) + "\n\n用户请求：" + req.message
+        user_input = {"messages": [HumanMessage(content=msg_content)]}
         thread_id = req.thread_id or str(uuid.uuid4())
         cfg = {"configurable": {"thread_id": thread_id}}
         result = await graph.ainvoke(user_input, cfg)
@@ -129,7 +133,11 @@ async def chat(req: ChatRequest):
 async def chat_stream(req: ChatRequest):
     async def sse_gen():
         graph = _ensure_graph()
-        user_input = {"messages": [HumanMessage(content=req.message)]}
+        # 将上传文件路径注入消息
+        msg_content = req.message
+        if req.uploaded_files:
+            msg_content = "用户已上传以下文件：\n" + "\n".join(f"  - {f}" for f in req.uploaded_files) + "\n\n用户请求：" + req.message
+        user_input = {"messages": [HumanMessage(content=msg_content)]}
         cfg = {"configurable": {"thread_id": req.thread_id or str(uuid.uuid4())}}
         try:
             async for event in graph.astream_events(user_input, cfg, version="v2"):
