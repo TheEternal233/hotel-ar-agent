@@ -1,4 +1,4 @@
-import os
+import os, re
 from langchain.tools import tool
 from tools.ar_recon.constants import FNB_CHANNELS
 from enums.common_enum import OUT_DIR
@@ -10,6 +10,8 @@ from utils.ar_recon_utils import read_xiangminiao
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
+PMS_MARKER = "rezen"
+
 def _cleanup_uploads(paths):
     for f in paths:
         try:
@@ -17,37 +19,133 @@ def _cleanup_uploads(paths):
         except OSError:
             pass
 
+def _process_single_channel(ota_path, pms_path, channel):
+    if channel == "向蜜鸟":
+        target = ota_path if os.path.exists(ota_path) else pms_path
+        ota_records, card_records, rezen_records = read_xiangminiao(target)
+        results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
+        report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
+    elif channel in FNB_CHANNELS:
+        ota_records = read_ota_channel(ota_path, channel)
+        rezen_records = read_rezen(pms_path)
+        results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
+        report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, pms_path)
+    else:
+        ota_records = read_ota_channel(ota_path, channel)
+        rezen_records = read_rezen(pms_path)
+        results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
+        report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
+    return results, stats, report_path
+
+def _build_upload_pairs(upload_dir):
+    files = sorted([f for f in os.listdir(upload_dir) if f.endswith((".xlsx", ".xls"))])
+    if not files:
+        return [], []
+
+    rezen_files = [f for f in files if PMS_MARKER in f.lower()]
+    ota_files = [f for f in files if PMS_MARKER not in f.lower()]
+
+    rezen_lookup = {}
+    for rf in rezen_files:
+        rf_base = os.path.splitext(rf)[0]
+        rf_clean = rf_base.replace(PMS_MARKER, "").replace("·", "").rstrip("0123456789")
+        rezen_lookup[rf_clean] = rf
+
+    pairs = []
+
+    for ota_file in ota_files:
+        ota_path = os.path.join(upload_dir, ota_file)
+        channel = detect_ota_channel(ota_path)
+        if channel is None or channel == "rezen":
+            continue
+
+        if channel == "向蜜鸟":
+            pairs.append((ota_path, ota_path, channel))
+            continue
+
+        ota_base = os.path.splitext(ota_file)[0]
+        ota_clean = re.sub(r'[0-9]+$', '', ota_base).strip()
+        matched_rezen = None
+        for rf_clean, rf in rezen_lookup.items():
+            if ota_clean in rf_clean or rf_clean in ota_clean or channel in rf_clean:
+                matched_rezen = rf
+                break
+        if matched_rezen is None:
+            for rf in rezen_files:
+                rf_base = os.path.splitext(rf)[0]
+                if channel in rf_base and PMS_MARKER in rf_base.lower():
+                    matched_rezen = rf
+                    break
+        if matched_rezen is None:
+            continue
+        rezen_path = os.path.join(upload_dir, matched_rezen)
+        pairs.append((ota_path, rezen_path, channel))
+
+    unused_rezen = [rf for rf in rezen_files if not any(rf == os.path.basename(p[1]) for p in pairs)]
+    return pairs, unused_rezen
+
 @tool
 def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
     """OTA对账：输入OTA导出和PMS(rezen)两个xlsx路径及渠道名，自动匹配并输出差额报告。
 
     渠道可选: 携程客房, 携程餐饮, 美团客房, 美团餐饮, 飞猪, 抖音, 向蜜鸟
     留空则自动检测渠道。
-    不传参数时自动扫描 uploads/ 目录下的文件。
+    不传参数时自动扫描 uploads/ 目录下的文件，按文件名自动配对多平台。
     """
     _cleanup = set()
-    if not ota_path and not pms_path:   # 参数为空，扫描 uploads/
+    if not ota_path and not pms_path:
         from enums.common_enum import BASE_DIR
         upload_dir = os.path.join(BASE_DIR, "uploads")
-        if os.path.exists(upload_dir):
-            files = sorted([f for f in os.listdir(upload_dir) if f.endswith((".xlsx", ".xls"))])
-            if files:
-                rezen_files = [f for f in files if "rezen" in f.lower()]
-                ota_files = [f for f in files if "rezen" not in f.lower()]
-                if ota_files and rezen_files:
-                    ota_path = os.path.join(upload_dir, ota_files[0])
-                    pms_path = os.path.join(upload_dir, rezen_files[0])
-                    _cleanup = {ota_path, pms_path}
-                elif len(files) == 1:
-                    ota_path = os.path.join(upload_dir, files[0])
-                    pms_path = ota_path
-                    _cleanup = {ota_path}
-                else:
-                    return f"uploads/ 目录文件: {', '.join(files)}。请指定 ota_path 和 pms_path。"
-        if not ota_path:
+        if not os.path.exists(upload_dir):
             return "请上传文件后再对账，或提供 ota_path 和 pms_path。"
 
-    if not ota_path or not pms_path:    #只传一个报错
+        pairs, unused_rezen = _build_upload_pairs(upload_dir)
+        if not pairs:
+            files = os.listdir(upload_dir)
+            return f"uploads/ 目录文件: {', '.join(files)}。未找到可配对的OTA和PMS文件。"
+
+        all_results = []
+        for op, pp, ch in pairs:
+            _cleanup.add(op)
+            _cleanup.add(pp)
+            try:
+                results, stats, report_path = _process_single_channel(op, pp, ch)
+                all_results.append({
+                    "channel": ch,
+                    "stats": stats,
+                    "report": report_path,
+                })
+            except Exception as e:
+                all_results.append({
+                    "channel": ch,
+                    "error": str(e),
+                })
+
+        _cleanup_uploads(_cleanup)
+
+        channel_lines = []
+        total_match = total_diff = total_ota_only = total_pms_only = 0
+        for r in all_results:
+            if "error" in r:
+                channel_lines.append(f"  {r['channel']}: 读取失败 - {r['error']}")
+                continue
+            st = r["stats"]
+            total_match += st["match"]
+            total_diff += st["diff"]
+            total_ota_only += st["ota_only"]
+            total_pms_only += st["pms_only"]
+            channel_lines.append(
+                f"  {r['channel']}: 匹配{st['match']} 差异{st['diff']} 仅OTA{st['ota_only']} 仅PMS{st['pms_only']}"
+            )
+
+        return (
+            f"OTA批量对账完成\n"
+            f"渠道数: {len([r for r in all_results if 'error' not in r])}\n"
+            f"匹配: {total_match}  差异: {total_diff}  仅OTA: {total_ota_only}  仅PMS: {total_pms_only}\n\n"
+            f"各渠道明细:\n" + "\n".join(channel_lines)
+        )
+
+    if not ota_path or not pms_path:
         return "错误：请同时提供 ota_path 和 pms_path，或都不提供进行批量对账"
 
     if not os.path.exists(ota_path):
@@ -63,27 +161,12 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
                 _cleanup.add(p)
 
     if not channel:
-        channel = detect_ota_channel(ota_path)  #自动检测渠道
+        channel = detect_ota_channel(ota_path)
         if channel is None or channel == "rezen":
             return f"无法自动检测渠道，请手动指定 channel 参数。"
 
     try:
-        if channel == "向蜜鸟":
-            # 两张路径指向同一个4-sheet文件
-            target = ota_path if os.path.exists(ota_path) else pms_path     #向蜜鸟只有一张表，这行保证无论参数在哪个位置都可以正常读取
-            ota_records, card_records, rezen_records = read_xiangminiao(target)
-            results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
-            report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
-        elif channel in FNB_CHANNELS:
-            ota_records = read_ota_channel(ota_path, channel)
-            rezen_records = read_rezen(pms_path)
-            results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
-            report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, pms_path)
-        else:
-            ota_records = read_ota_channel(ota_path, channel)
-            rezen_records = read_rezen(pms_path)
-            results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-            report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
+        results, stats, report_path = _process_single_channel(ota_path, pms_path, channel)
     except Exception as e:
         _cleanup_uploads(_cleanup)
         return f"读取文件失败: {e}"
