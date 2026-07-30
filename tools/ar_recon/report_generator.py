@@ -8,6 +8,7 @@ from enums.common_enum import (
     OUT_DIR, HEADER_FILL, HEADER_FONT, THIN_BORDER,
     RED_FILL, GREEN_FILL, YELLOW_FILL,
 )
+from tools.doc_parser import read_sheet
 from utils.ar_recon_utils import _copy_sheet_to_wb
 
 
@@ -221,6 +222,9 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
     out_path = _make_out_path(channel_name)
     wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
 
+    _STATUS_ORDER={STATUS_MATCH:0,STATUS_DIFF:1,STATUS_PMS_ONLY:2,STATUS_OTA_ONLY:3}
+    results=sorted(results, key=lambda r:_STATUS_ORDER.get(r["status"],9))
+
     ws = wb.create_sheet(SHEET_SUMMARY)
     row = _write_summary_block(ws, 1, _build_std_info(results, stats, channel_name, ota_path, pms_path), _std_red_check)
 
@@ -241,6 +245,9 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
     out_path = _make_out_path(channel_name)
     wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
 
+    _STATUS_ORDER={STATUS_MATCH:0,STATUS_DIFF:1,STATUS_PMS_ONLY:2,STATUS_OTA_ONLY:3}
+    results=sorted(results, key=lambda r:_STATUS_ORDER.get(r["status"],9))
+
     ws = wb.create_sheet(SHEET_SUMMARY)
     row = _write_summary_block(ws, 1, _build_fnb_info(results, stats, channel_name, ota_path, pms_path), _fnb_red_check)
 
@@ -255,3 +262,157 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
     row = _write_data_rows(ws, row, results, _fnb_full_cols, skip_match=False)
 
     return _save_and_close(wb, out_path)
+
+
+def _generate_ar_report_a(results,stats,channel_name,ota_path,pms_path):
+    """A类渠道报告，前两个为PMS，OTA源文件，第三为PMS原表+差异字段，ota_only单独列出"""
+    out_path = _make_out_path(channel_name)
+    wb= _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
+
+    ws=wb.create_sheet(SHEET_SUMMARY)
+
+    pms_headers,pms_raw_rows=read_sheet(pms_path)
+    while pms_headers and pms_headers[-1]=="":
+        pms_headers.pop()
+
+    bill_to_row={}
+    for row in pms_raw_rows:
+        bid=str(row.get("账单号","")or "")
+        if bid:
+            bill_to_row[bid]=row
+
+
+    bill_to_result={}
+    ota_only_results=[]
+    for r in results:
+        if r["status"]==STATUS_OTA_ONLY:
+            ota_only_results.append(r)
+            continue
+        pms=r.get("pms")
+        if pms:
+            bid=pms.get("bill_id","")
+            if bid:
+                bill_to_result[bid]=r
+
+    diff_hdrs=["状态","OTA单号","OTA金额","差额","备注"]
+    all_hdrs=pms_headers + diff_hdrs
+
+    n_pms=len(pms_headers)
+    _write_headers(ws,1,all_hdrs)
+
+    _STATUS_ORDER={STATUS_MATCH:0,STATUS_DIFF:1,STATUS_PMS_ONLY:2,STATUS_OTA_ONLY:3}
+    sorted_results=sorted(results,key=lambda r: _STATUS_ORDER.get(r["status"],9))
+    row_idx=2
+    for r in sorted_results:
+        pms=r.get("pms")
+        if pms:
+            bid=pms.get("bill_id","")
+            raw_row=bill_to_row.get(bid,{})
+            for j,h in enumerate(pms_headers,1):
+                c=ws.cell(row=row_idx,column=j,value=raw_row.get(h))
+                c.border=THIN_BORDER
+
+
+        diff_vals=[r["status"],r.get("ota_order",""),r.get("ota_amount",0),r.get("diff",0),""]
+
+
+        for j,v in enumerate(diff_vals,n_pms+1):
+            c=ws.cell(row=row_idx,column=j,value=v)
+            c.border=THIN_BORDER
+            _apply_status_color(c,r["status"])
+        row_idx+=1
+
+
+
+    return _save_and_close(wb, out_path)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

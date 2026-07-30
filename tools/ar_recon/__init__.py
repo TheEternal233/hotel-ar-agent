@@ -4,7 +4,8 @@ from tools.ar_recon.constants import FNB_CHANNELS
 from enums.common_enum import OUT_DIR
 from tools.ar_recon.matcher import _match_ota_rezen, _match_ota_rezen_fnb, match_xiangminiao
 from tools.ar_recon.batch_runner import batch_ota_recon
-from tools.ar_recon.report_generator import _generate_ar_report_fnb, _generate_report, _generate_ar_report
+from tools.ar_recon.report_generator import _generate_ar_report_fnb, _generate_report, _generate_ar_report, \
+    _generate_ar_report_a
 from tools.doc_parser import read_ota_channel, read_rezen, detect_ota_channel
 from utils.ar_recon_utils import read_xiangminiao
 
@@ -34,7 +35,7 @@ def _process_single_channel(ota_path, pms_path, channel):
         ota_records = read_ota_channel(ota_path, channel)
         rezen_records = read_rezen(pms_path)
         results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-        report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
+        report_path = _generate_ar_report_a(results, stats, channel, ota_path, pms_path)
     return results, stats, report_path
 
 def _build_upload_pairs(upload_dir):

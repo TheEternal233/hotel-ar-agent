@@ -5,7 +5,8 @@ import openpyxl
 
 from tools.ar_recon import _match_ota_rezen_fnb, _match_ota_rezen, FNB_CHANNELS, match_xiangminiao
 from enums.common_enum import YELLOW_FILL, THIN_BORDER, HEADER_FILL, BASE_DIR,  OUT_DIR, HEADER_FONT
-from tools.ar_recon.report_generator import _generate_report, _generate_ar_report_fnb, _generate_ar_report
+from tools.ar_recon.report_generator import _generate_report, _generate_ar_report_fnb, _generate_ar_report, \
+    _generate_ar_report_a
 from tools.doc_parser import detect_ota_channel, read_ota_channel, read_rezen
 from utils.ar_recon_utils import read_xiangminiao
 
@@ -96,7 +97,7 @@ def batch_ota_recon(data_dir=None):
             report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, rezen_path)
         else:
             results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-            report_path = _generate_ar_report(results, stats, channel, ota_path, rezen_path)
+            report_path = _generate_ar_report_a(results, stats, channel, ota_path, rezen_path)
         all_stats.append({
             "channel": channel,
             "file": ota_file,
