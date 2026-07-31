@@ -1,79 +1,60 @@
-"""信用卡对账：数据解析器集合
+"""信用卡对账：数据解析器
 
-包含 PMS报表、POS银行流水、PMS应收后台、YFD银行流水 的专用解析器。
+读取 PMS报表 与 POS机银行流水，按 4 种规范付款方式
+（微信、支付宝、OTA卡、预付卡）分组。
+挂应收、挂房账、挂团队、OC、ENT、YFD 等付款方式不统计。
 """
 
-from tools.doc_parser import read_sheet, read_rezen
-from tools.credit_card_recon.matcher import classify_channel, split_debit_credit
-
-
-def read_yfd_bank(path, sheet_name=None):
-    """读取YFD银行流水 — 表头在第5行，过滤RD数据行和RT汇总行"""
-    from tools.doc_parser import _open, _get_headers
-
-    wb, ws = _open(path, sheet_name)
-    headers = _get_headers(ws, header_row=5)
-
-    records = []
-    for row in ws.iter_rows(min_row=6, values_only=True):
-        if all(v is None for v in row):
-            continue
-        # 第一列 'RD' = 数据行, 'RT' = 汇总行
-        file_info = str(row[0] or "").strip()
-        if file_info != "RD":
-            continue
-
-        rec = dict(zip(headers, row))
-        records.append({
-            "amount": float(rec.get("金额", 0) or 0),
-            "fee": float(rec.get("服务佣金", 0) or 0),
-            "net": float(rec.get("结算金额", 0) or 0),
-            "terminal": str(rec.get("终端号", "")),
-            "tx_type": str(rec.get("交易类型", "")),
-            "tx_time": str(rec.get("交易时间", "")),
-            "store": str(rec.get("店铺名称", "")),
-            "raw": rec,
-        })
-    wb.close()
-    return records
+from tools.doc_parser import read_sheet
+from tools.credit_card_recon.constants import normalize_payment
 
 
 def _read_pms_report(path):
-    """读取 PMS报表，按付款描述分组
+    """读取 PMS报表，按规范付款方式分组。
 
-    过滤掉汇总行（付款代码非数字的行），按 desc 列分组。
+    - 表头在第 1 行。
+    - 跳过汇总行（付款代码非纯数字的行，如「金额:/数量:」汇总行与「总计」行）。
+    - 将「付款描述」映射到 4 种规范付款方式；命中排除项的不统计。
+
+    Returns:
+        dict: {规范付款方式: [{"amount", "bill_no", "raw"}, ...]}
     """
     headers, rows = read_sheet(path)
-    payment_groups = {}
+    groups = {}
     for r in rows:
         code = str(r.get("付款代码", "")).strip()
-        # 跳过汇总行
+        # 跳过汇总行（付款代码不是纯数字）
         if not code.isdigit():
             continue
         desc = str(r.get("付款描述", "")).strip()
+        method = normalize_payment(desc, source="pms")
+        if method is None:
+            continue  # 不在 4 种之内的不统计
         amt_val = r.get("金额", 0)
         try:
             amount = float(amt_val) if amt_val is not None else 0
         except (ValueError, TypeError):
             continue
-        pay_type = desc if desc else None
-        if pay_type not in payment_groups:
-            payment_groups[pay_type] = []
-        payment_groups[pay_type].append({
+        groups.setdefault(method, []).append({
             "amount": amount,
             "bill_no": str(r.get("账单号", "")),
             "raw": r,
         })
-    return payment_groups
+    return groups
 
 
 def _read_pos_statement(path):
-    """读取 POS机银行流水，过滤非消费类交易
+    """读取 POS机银行流水，按规范付款方式分组。
 
-    表头在第3行，只保留"消费"类交易（排除押金确认等）。
+    - 表头在第 3 行（前两行为商户/对账单元信息）。
+    - 只保留「消费」类交易，排除「押金确认」等非消费交易。
+    - 将「支付类型」映射到 4 种规范付款方式；命中排除项的不统计。
+
+    Returns:
+        dict: {规范付款方式: [{"amount", "fee", "net", "tx_time", "raw"}, ...]}
     """
     headers, rows = read_sheet(path, header_row=3)
-    records = []
+    groups = {}
     for r in rows:
         pay_type = str(r.get("支付类型", "")).strip()
         tx_type = str(r.get("交易类型", "")).strip()
@@ -82,30 +63,14 @@ def _read_pos_statement(path):
         # 只统计消费类交易，排除押金确认等
         if tx_type and tx_type not in ("消费", "sale", "charge"):
             continue
-        records.append({
+        method = normalize_payment(pay_type, source="pos")
+        if method is None:
+            continue  # 不在 4 种之内的不统计
+        groups.setdefault(method, []).append({
             "amount": float(r.get("客户实付金额", 0) or 0),
             "fee": float(r.get("手续费金额", 0) or 0),
             "net": float(r.get("入账金额", 0) or 0),
-            "pay_type": pay_type,
-            "tx_type": tx_type,
             "tx_time": r.get("交易时间"),
             "raw": r,
         })
-    return records
-
-
-def _read_pms_ar_backend(path):
-    """读取 PMS应收后台，分离借方/贷方，只保留收款"""
-    records = read_rezen(path)
-    charges, refunds = split_debit_credit(records)
-
-    result = []
-    for r in charges:
-        result.append({
-            "amount": float(r.get("amount", 0)),
-            "bill_no": str(r.get("bill_id", "")),
-            "channel": classify_channel(r.get("name", "")),
-            "name": r.get("name", ""),
-            "raw": r,
-        })
-    return result
+    return groups

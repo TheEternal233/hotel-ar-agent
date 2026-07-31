@@ -1,29 +1,47 @@
-"""信用卡对账：差异报告生成"""
+"""信用卡对账：对账差异报告生成
+
+输出一个 Excel 对账差异表格：
+  Sheet1「对账差异汇总」—— 每种付款方式的 PMS/POS 数量、金额、差额、对平状态；
+  Sheet2「差异明细」    —— 未能逐笔配对的 PMS 短款 / POS 长款明细。
+"""
 
 import os
 from datetime import datetime
 
 from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 from tools import BASE_DIR
 from tools.credit_card_recon.constants import (
     HEADER_FILL, HEADER_FONT, THIN_BORDER,
     RED_FILL, YELLOW_FILL, GREEN_FILL,
+    AMOUNT_TOLERANCE,
 )
 
 
 def _generate_recon_report(recon_results):
-    """生成对账差异报告 Excel"""
+    """生成对账差异报告 Excel
+
+    Args:
+        recon_results: _reconcile_channel 的结果列表
+
+    Returns:
+        str: 含各付款方式差异摘要与报告路径的文本
+    """
     out_dir = os.path.join(BASE_DIR, "output")
     os.makedirs(out_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = os.path.join(out_dir, f"信用卡对账报告_{now}.xlsx")
+    out_path = os.path.join(out_dir, f"对账差异报告_{now}.xlsx")
 
     wb = Workbook()
 
-    # Sheet 1: 对账汇总
+    # ===== Sheet 1: 对账差异汇总 =====
     ws = wb.active
-    ws.title = "对账汇总"
-    headers = ["通道", "PMS金额", "银行金额", "差额", "手续费", "PMS条数", "银行条数", "条数平", "金额平", "状态"]
+    ws.title = "对账差异汇总"
+    headers = [
+        "付款方式", "PMS数量", "POS数量", "数量差",
+        "PMS金额", "POS金额", "金额差额",
+        "数量匹配", "金额匹配", "逐笔匹配", "状态",
+    ]
     for j, h in enumerate(headers, 1):
         c = ws.cell(row=1, column=j, value=h)
         c.fill = HEADER_FILL
@@ -31,25 +49,42 @@ def _generate_recon_report(recon_results):
         c.border = THIN_BORDER
 
     for i, r in enumerate(recon_results, 2):
-        ws.cell(row=i, column=1, value=r["channel"])
-        ws.cell(row=i, column=2, value=r["pms_total"])
-        ws.cell(row=i, column=3, value=r["bank_total"])
-        ws.cell(row=i, column=4, value=r["diff"])
-        ws.cell(row=i, column=5, value=r.get("bank_fees", 0))
-        ws.cell(row=i, column=6, value=r["pms_count"])
-        ws.cell(row=i, column=7, value=r["bank_count"])
-        ws.cell(row=i, column=8, value="是" if r["count_match"] else "否")
-        ws.cell(row=i, column=9, value="是" if abs(r["diff"]) <= 0.01 else "否")
-        status = "对平" if r["balanced"] else "差异"
-        c = ws.cell(row=i, column=10, value=status)
-        if r["balanced"]:
-            c.fill = GREEN_FILL
-        else:
-            c.fill = RED_FILL
+        count_diff = r["pms_count"] - r["bank_count"]
+        row_vals = [
+            r["channel"],
+            r["pms_count"],
+            r["bank_count"],
+            count_diff,
+            r["pms_total"],
+            r["bank_total"],
+            r["diff"],
+            "是" if r["count_match"] else "否",
+            "是" if r["amount_match"] else "否",
+            "是" if r.get("all_matched", True) else "否",
+            "对平" if r["balanced"] else "差异",
+        ]
+        for j, v in enumerate(row_vals, 1):
+            c = ws.cell(row=i, column=j, value=v)
+            c.border = THIN_BORDER
+        # 状态列着色
+        status_cell = ws.cell(row=i, column=11)
+        status_cell.fill = GREEN_FILL if r["balanced"] else RED_FILL
+        # 差额不为 0 的金额差额列标黄
+        if abs(r["diff"]) > AMOUNT_TOLERANCE:
+            ws.cell(row=i, column=7).fill = YELLOW_FILL
+        if not r["count_match"]:
+            ws.cell(row=i, column=4).fill = YELLOW_FILL
+        # 逐笔未全部配对时标黄提醒
+        if not r.get("all_matched", True):
+            ws.cell(row=i, column=10).fill = YELLOW_FILL
 
-    # Sheet 2: 差异明细
+    col_widths = [12, 10, 10, 10, 14, 14, 14, 10, 10, 10, 8]
+    for j, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(j)].width = w
+
+    # ===== Sheet 2: 差异明细 =====
     ws2 = wb.create_sheet("差异明细")
-    hdrs = ["通道", "类型", "金额", "来源", "原始数据"]
+    hdrs = ["付款方式", "来源", "差异类型", "金额", "原始数据"]
     for j, h in enumerate(hdrs, 1):
         c = ws2.cell(row=1, column=j, value=h)
         c.fill = HEADER_FILL
@@ -58,26 +93,22 @@ def _generate_recon_report(recon_results):
 
     ri = 2
     for r in recon_results:
+        # PMS 短款：PMS 有、POS 无对应
         for um in r.get("unmatched_pms", []):
             vals = [
-                r["channel"],
-                "PMS短款",
-                um.get("amount", 0),
-                "PMS",
-                str(um.get("raw", {})),
+                r["channel"], "PMS", "PMS短款",
+                um.get("amount", 0), str(um.get("raw", {})),
             ]
             for j, v in enumerate(vals, 1):
                 c = ws2.cell(row=ri, column=j, value=v)
                 c.fill = RED_FILL
                 c.border = THIN_BORDER
             ri += 1
+        # POS 长款：POS 有、PMS 无对应
         for um in r.get("unmatched_bank", []):
             vals = [
-                r["channel"],
-                "银行长款",
-                um.get("amount", 0),
-                "BANK",
-                str(um.get("raw", {})),
+                r["channel"], "POS", "POS长款",
+                um.get("amount", 0), str(um.get("raw", {})),
             ]
             for j, v in enumerate(vals, 1):
                 c = ws2.cell(row=ri, column=j, value=v)
@@ -85,11 +116,25 @@ def _generate_recon_report(recon_results):
                 c.border = THIN_BORDER
             ri += 1
 
+    detail_widths = [12, 8, 10, 12, 60]
+    for j, w in enumerate(detail_widths, 1):
+        ws2.column_dimensions[get_column_letter(j)].width = w
+
     wb.save(out_path)
     wb.close()
 
-    summary_lines = [
-        f"通道 {r['channel']}: 差额 {r['diff']:.2f} ({'对平' if r['balanced'] else '差异'})"
-        for r in recon_results
-    ]
+    # 文本摘要
+    summary_lines = []
+    for r in recon_results:
+        flag = "对平" if r["balanced"] else "差异"
+        detail = (
+            f"匹配{r.get('matched_count', 0)}笔"
+            f"(PMS短款{r.get('unmatched_pms_count', 0)}/POS长款{r.get('unmatched_bank_count', 0)})"
+        )
+        summary_lines.append(
+            f"{r['channel']}: PMS数量{r['pms_count']}/POS数量{r['bank_count']}("
+            f"{'数量一致' if r['count_match'] else '数量不一致'}), "
+            f"PMS金额{r['pms_total']:.2f}/POS金额{r['bank_total']:.2f}, "
+            f"差额{r['diff']:.2f}, {detail} ({flag})"
+        )
     return "对账完成\n" + "\n".join(summary_lines) + f"\n\n报告: {out_path}"

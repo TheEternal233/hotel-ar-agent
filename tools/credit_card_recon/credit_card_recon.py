@@ -1,11 +1,15 @@
-"""M07: 信用卡对账 — 按支付方式分组 + YFD预付卡独立通道
+"""信用卡对账 — 微信 / 支付宝 / OTA卡 / 预付卡 四种付款方式对账
 
-入口文件。负责文件分类、数据流编排、对账调度、报告输出。
-解析/对账/报告逻辑分别下沉到 parser / matcher / reporter 模块。
+入口文件。负责文件识别、数据流编排、对账调度、报告输出。
+流程：
+  读取 PMS报表 + POS机银行流水
+  → 分别按 4 种付款方式统计数量与金额
+  → 同种付款方式数量匹配后对比金额，相同则对平、不同则计算差额
+  → 输出对账差异表格
+挂应收、挂房账、挂团队、OC、ENT、YFD 等付款方式不统计。
 """
 
 import os
-from datetime import datetime
 
 try:
     from langchain.tools import tool
@@ -16,258 +20,93 @@ except ImportError:
         return fn
 
 from tools import BASE_DIR
-from tools.credit_card_recon.parser import (
-    read_yfd_bank, _read_pms_report, _read_pos_statement, _read_pms_ar_backend,
-)
+from tools.credit_card_recon.parser import _read_pms_report, _read_pos_statement
 from tools.credit_card_recon.matcher import _reconcile_channel
 from tools.credit_card_recon.reporter import _generate_recon_report
-from tools.credit_card_recon.constants import PAY_TYPE_TO_CHANNEL, YFD_TYPE_MAP
-from tools.doc_parser import read_sheet
+from tools.credit_card_recon.constants import RECON_PAYMENT_METHODS
 
 
 def _classify_files(data_dir):
-    """扫描目录，按文件名分类到 8 种数据源"""
+    """扫描目录，识别 PMS报表 与 POS机银行流水 文件
+
+    Returns:
+        dict: {"pms_report": filename|None, "pos": filename|None}
+    """
     files = [f for f in os.listdir(data_dir) if f.endswith(".xlsx")]
-
-    mapping = {
-        "pms_report": None, "pos": None,
-        "wechat_ar": None, "alipay_ar": None,
-        "yfd_wechat_ar": None, "yfd_alipay_ar": None,
-        "yfd_wechat_bank": None, "yfd_alipay_bank": None,
-    }
-
+    mapping = {"pms_report": None, "pos": None}
     for f in files:
         fl = f.lower()
         if "pms报表" in fl:
             mapping["pms_report"] = f
-        elif "yfd" in fl and "银行流水" in fl:
-            if "wechat" in fl or "微信" in fl:
-                mapping["yfd_wechat_bank"] = f
-            elif "alipay" in fl or "支付宝" in fl:
-                mapping["yfd_alipay_bank"] = f
-        elif "yfd" in fl and "应收后台" in fl:
-            if "wechat" in fl or "微信" in fl:
-                mapping["yfd_wechat_ar"] = f
-            elif "alipay" in fl or "支付宝" in fl:
-                mapping["yfd_alipay_ar"] = f
         elif "pos" in fl or ("银行流水" in fl and "yfd" not in fl):
             mapping["pos"] = f
-        elif "应收后台" in fl and "yfd" not in fl:
-            if "wechat" in fl or "微信" in fl:
-                mapping["wechat_ar"] = f
-            elif "alipay" in fl or "支付宝" in fl:
-                mapping["alipay_ar"] = f
-
     return mapping
 
 
-def _group_by_key(records, key_fn):
-    """通用分组工具"""
-    groups = {}
-    for r in records:
-        k = key_fn(r)
-        if k not in groups:
-            groups[k] = []
-        groups[k].append(r)
-    return groups
+def _run_recon(pms_path, pos_path):
+    """执行对账核心流程：解析 → 按 4 种付款方式对账 → 生成报告"""
+    # 1) 读取 PMS报表 与 POS银行流水，按 4 种付款方式分组
+    pms_groups = _read_pms_report(pms_path)
+    pos_groups = _read_pos_statement(pos_path)
+
+    # 2) 对 4 种付款方式逐一对账（数量匹配 + 金额对比 + 差额）
+    recon_results = []
+    for method in RECON_PAYMENT_METHODS:
+        pms_txs = pms_groups.get(method, [])
+        pos_txs = pos_groups.get(method, [])
+        # 只对至少一方有数据的付款方式生成对账结果
+        if pms_txs or pos_txs:
+            recon_results.append(_reconcile_channel(method, pms_txs, pos_txs))
+
+    # 3) 输出对账差异表格
+    return _generate_recon_report(recon_results)
 
 
 def batch_card_recon(data_dir=None):
-    """批量信用卡对账：自动配对 PMS报表 + PMS应收后台 + 银行流水"""
+    """批量信用卡对账：自动读取目录下 PMS报表 与 POS机银行流水并对账"""
     if data_dir is None:
         data_dir = os.path.join(BASE_DIR, "data", "清远", "信用卡对账")
     if not os.path.exists(data_dir):
         return f"错误：数据目录不存在: {data_dir}"
 
     files = _classify_files(data_dir)
+    if not files["pms_report"]:
+        return "错误：未找到 PMS报表 文件"
+    if not files["pos"]:
+        return "错误：未找到 POS机银行流水 文件"
 
-    # 解析所有数据源
-    pms_groups = (
-        _read_pms_report(os.path.join(data_dir, files["pms_report"]))
-        if files["pms_report"] else {}
+    return _run_recon(
+        os.path.join(data_dir, files["pms_report"]),
+        os.path.join(data_dir, files["pos"]),
     )
-    pos_records = (
-        _read_pos_statement(os.path.join(data_dir, files["pos"]))
-        if files["pos"] else []
-    )
 
-    ar_records = []
-    for key in ("wechat_ar", "alipay_ar", "yfd_wechat_ar", "yfd_alipay_ar"):
-        if files[key]:
-            ar_records.extend(_read_pms_ar_backend(os.path.join(data_dir, files[key])))
-
-    yfd_bank_records = []
-    for key in ("yfd_wechat_bank", "yfd_alipay_bank"):
-        if files[key]:
-            yfd_bank_records.extend(read_yfd_bank(os.path.join(data_dir, files[key])))
-
-    # 按通道分组
-    pos_by_type = _group_by_key(pos_records, lambda r: r["pay_type"])
-    ar_by_channel = _group_by_key(ar_records, lambda r: r["channel"])
-    yfd_by_channel = _group_by_key(yfd_bank_records, lambda r: YFD_TYPE_MAP.get(r["tx_type"], r["tx_type"]))
-
-    # 执行对账
-    recon_results = []
-
-    # WECHAT / ALIPAY：PMS报表 vs POS银行流水
-    for pay_type, channel in PAY_TYPE_TO_CHANNEL.items():
-        pms_txs = pms_groups.get(pay_type, [])
-        bank_txs = pos_by_type.get(pay_type, [])
-        if pms_txs or bank_txs:
-            recon_results.append(_reconcile_channel(channel, pms_txs, bank_txs))
-
-    # YFD：PMS应收 vs YFD银行流水
-    for channel in ("YFD_WECHAT", "YFD_ALIPAY"):
-        pms_txs = ar_by_channel.get(channel, [])
-        bank_txs = yfd_by_channel.get(channel, [])
-        if pms_txs or bank_txs:
-            recon_results.append(_reconcile_channel(channel, pms_txs, bank_txs))
-
-    return _generate_recon_report(recon_results)
-def _detect_file_type(path):
-    """检测文件类型: 'pms_report' | 'pos_statement' | 'card_statement' | 'unknown'"""
-    from tools.doc_parser import _open, _get_headers
-    wb, ws = _open(path)
-    h1_str = " ".join(str(h) for h in _get_headers(ws, 1) if h)
-    if "付款代码" in h1_str and "付款描述" in h1_str:
-        wb.close()
-        return "pms_report"
-    h3_str = " ".join(str(h) for h in _get_headers(ws, 3) if h)
-    if "支付类型" in h3_str and "客户实付金额" in h3_str:
-        wb.close()
-        return "pos_statement"
-    if "支付类型" in h1_str and "客户实付金额" in h1_str:
-        wb.close()
-        return "pos_statement"
-    if "卡号" in h1_str or "card" in h1_str.lower():
-        wb.close()
-        return "card_statement"
-    wb.close()
-    return "unknown"
-
-def _normalize_pay_type(pay_type, source):
-    """统一支付方式名称：PMS '微信' -> '微信支付'，其他保持一致"""
-    if source == "pms":
-        mapping = {"微信": "微信支付", "支付宝": "支付宝支付"}
-        return mapping.get(pay_type, pay_type)
-    return pay_type
-
-def _flatten_pms_groups(pms_groups):
-    """将 PMS报表分组展平为单通道模式可用的交易列表"""
-    transactions = []
-    for pay_type, txs in pms_groups.items():
-        for tx in txs:
-            transactions.append({
-                "amount": tx["amount"],
-                "pay_type": pay_type,
-                "bill_no": tx.get("bill_no", ""),
-                "raw": tx.get("raw", {}),
-            })
-    return transactions
 
 @tool
 def credit_card_recon(bank_statement_path: str = "", pms_card_path: str = "") -> str:
-    """信用卡对账：支持批量模式(无参数)和单通道模式。
-    批量模式自动读取 data/清远/信用卡对账 目录下所有文件并生成汇总。
-    单通道模式自动检测文件类型(PMS报表/POS流水/卡对账单)，按支付方式分组对账。
+    """信用卡对账：对微信/支付宝/OTA卡/预付卡 4 种付款方式对账。
+
+    - 无参数：批量模式，自动读取 data/清远/信用卡对账 目录下文件。
+    - 传参：bank_statement_path 为 POS机银行流水路径，pms_card_path 为 PMS报表路径。
     """
     if not bank_statement_path and not pms_card_path:
         return batch_card_recon()
 
     for p in (bank_statement_path, pms_card_path):
-        if not os.path.exists(p):
-            return f"error: {p}"
+        if not p or not os.path.exists(p):
+            return f"error: 文件不存在 {p}"
 
-    bank_type = _detect_file_type(bank_statement_path)
-    pms_type = _detect_file_type(pms_card_path)
 
-    # 根据文件类型选择解析器
-    if pms_type == "pms_report":
-        pms_groups = _read_pms_report(pms_card_path)
-        pms_txs = _flatten_pms_groups(pms_groups)
-        for tx in pms_txs:
-            tx["pay_type"] = _normalize_pay_type(tx["pay_type"], "pms")
-    elif pms_type == "pos_statement":
-        pms_txs = [{"amount": r["amount"], "pay_type": r["pay_type"], "raw": r} for r in _read_pos_statement(pms_card_path)]
-    else:
-        def _parse_date(val):
-            if isinstance(val, datetime):
-                return val
-            if isinstance(val, str) and val.strip():
-                for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"):
-                    try:
-                        return datetime.strptime(val.strip(), fmt)
-                    except ValueError:
-                        pass
-            return None
-
-        headers, rows = read_sheet(pms_card_path)
-        pms_txs = []
-        for r in rows:
-            date_val = r.get("日期", r.get("交易日期", r.get("date", "")))
-            amount_val = r.get("金额", r.get("交易金额", r.get("amount", 0)))
-            try:
-                amount = float(amount_val or 0)
-            except (ValueError, TypeError):
-                continue
-            card_val = r.get("卡号", r.get("card", ""))
-            pms_txs.append({
-                "date": _parse_date(date_val),
-                "amount": amount,
-                "card": str(card_val).strip()[-4:],
-                "raw": r,
-            })
-
-    if bank_type == "pos_statement":
-        pos_records = _read_pos_statement(bank_statement_path)
-        bank_txs = [{"amount": r["amount"], "pay_type": r["pay_type"], "fee": r["fee"], "raw": r} for r in pos_records]
-    elif bank_type == "pms_report":
-        bank_groups = _read_pms_report(bank_statement_path)
-        bank_txs = _flatten_pms_groups(bank_groups)
-    else:
-        def _parse_date(val):
-            if isinstance(val, datetime):
-                return val
-            if isinstance(val, str) and val.strip():
-                for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"):
-                    try:
-                        return datetime.strptime(val.strip(), fmt)
-                    except ValueError:
-                        pass
-            return None
-
-        headers, rows = read_sheet(bank_statement_path)
-        bank_txs = []
-        for r in rows:
-            date_val = r.get("日期", r.get("交易日期", r.get("date", "")))
-            amount_val = r.get("金额", r.get("交易金额", r.get("amount", 0)))
-            try:
-                amount = float(amount_val or 0)
-            except (ValueError, TypeError):
-                continue
-            card_val = r.get("卡号", r.get("card", ""))
-            bank_txs.append({
-                "date": _parse_date(date_val),
-                "amount": amount,
-                "card": str(card_val).strip()[-4:],
-                "raw": r,
-            })
-
-    # 按支付方式分组后逐通道对账
-    pms_by_type = _group_by_key(pms_txs, lambda r: r.get("pay_type", "未知"))
-    bank_by_type = _group_by_key(bank_txs, lambda r: r.get("pay_type", "未知"))
-
-    all_types = set(pms_by_type.keys()) | set(bank_by_type.keys())
-    recon_results = []
-    for pay_type in sorted(all_types):
-        pms = pms_by_type.get(pay_type, [])
-        bank = bank_by_type.get(pay_type, [])
-        if pms or bank:
-            recon_results.append(_reconcile_channel(pay_type, pms, bank))
-
-    return _generate_recon_report(recon_results)
+    # _run_recon(pms_path, pos_path)：PMS报表在前，POS流水在后
+    result=_run_recon(pms_card_path,bank_statement_path)
+    uploads_dir=os.path.join(BASE_DIR, "uploads")
+    for p in (bank_statement_path,pms_card_path):
+        try:
+            if p and os.path.exists(p) and os.path.abspath(p).startswith(os.path.abspath(uploads_dir)):
+                os.remove(p)
+        except OSError:
+            pass
+    return result
 
 
 if __name__ == "__main__":
-    result = batch_card_recon()
-    print(result)
+    print(batch_card_recon())

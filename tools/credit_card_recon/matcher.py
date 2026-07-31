@@ -1,34 +1,21 @@
-"""信用卡对账：通道分类 + 借方贷方分离 + 金额配对 + 对账核心"""
+"""信用卡对账：对账核心逻辑
+
+对每种付款方式：
+1. 数量匹配 —— 对比 PMS 与 POS 的交易笔数是否一致；
+2. 金额对比 —— 对比 PMS 与 POS 的金额合计，相同则对平，不同则计算差额；
+3. 逐笔配对 —— 同金额分组配对，找出未匹配明细供差异表展示。
+"""
 
 from collections import defaultdict
 
-
-def classify_channel(name: str) -> str:
-    """从 PMS应收后台的姓名/描述字段推断支付通道"""
-    name = name.upper()
-    if "YFD" in name:
-        if "微信" in name or "WECHAT" in name:
-            return "YFD_WECHAT"
-        if "支付宝" in name or "ALIPAY" in name:
-            return "YFD_ALIPAY"
-    if "微信" in name or "WECHAT" in name:
-        return "WECHAT"
-    if "支付宝" in name or "ALIPAY" in name:
-        return "ALIPAY"
-    return "UNKNOWN"
+from tools.credit_card_recon.constants import AMOUNT_TOLERANCE
 
 
-def split_debit_credit(records):
-    """分离借方（收款）和贷方（退款）"""
-    charges = [r for r in records if r.get("type") == "借方"]
-    refunds = [r for r in records if r.get("type") == "贷方"]
-    return charges, refunds
+def _match_by_amount(pms_txs, bank_txs):
+    """同金额分组配对：先按金额分组，同金额多笔按顺序配对。
 
-
-def _match_by_amount(pms_txs, bank_txs, tolerance=0.01):
-    """同金额分组配对算法。先精确匹配，同金额多笔时按顺序配对。
-
-    Returns: (matched_pairs, unmatched_pms, unmatched_bank)
+    Returns:
+        (matched_pairs, unmatched_pms, unmatched_bank)
     """
     def group_by_amount(txs):
         groups = defaultdict(list)
@@ -44,23 +31,21 @@ def _match_by_amount(pms_txs, bank_txs, tolerance=0.01):
     unmatched_pms = []
     unmatched_bank = []
 
-    # 第1轮：精确金额匹配
+    # 第 1 轮：精确金额匹配
     for amount, pms_list in list(pms_groups.items()):
         bank_list = bank_groups.get(amount, [])
         match_count = min(len(pms_list), len(bank_list))
         for i in range(match_count):
             matched.append({"pms": pms_list[i], "bank": bank_list[i], "amount": amount})
-        # 剩余未匹配的
         for i in range(match_count, len(pms_list)):
             unmatched_pms.append(pms_list[i])
         for i in range(match_count, len(bank_list)):
             unmatched_bank.append(bank_list[i])
-        # 清空已处理
         del pms_groups[amount]
         if amount in bank_groups:
             del bank_groups[amount]
 
-    # 剩余未匹配（金额组完全不存在于对方）
+    # 剩余未匹配（金额组在对方完全不存在）
     for pms_list in pms_groups.values():
         unmatched_pms.extend(pms_list)
     for bank_list in bank_groups.values():
@@ -70,37 +55,56 @@ def _match_by_amount(pms_txs, bank_txs, tolerance=0.01):
 
 
 def _reconcile_channel(channel, pms_txs, bank_txs):
-    """单个通道的对账逻辑
+    """单个付款方式的对账逻辑。
 
-    Returns: dict with channel, pms_total, bank_total, diff, counts, match results
+    流程：
+      数量匹配 → 金额对比 → 计算差额 → 逐笔配对找差异明细。
+
+    Returns:
+        dict: channel, pms_count, bank_count, count_match,
+              pms_total, bank_total, diff, amount_match, balanced,
+              matched, unmatched_pms, unmatched_bank
     """
-    # Step 2: 金额聚合对比
-    pms_total = sum(t.get("amount", 0) for t in pms_txs)
-    bank_total = sum(t.get("amount", 0) for t in bank_txs)
-    bank_fees = sum(t.get("fee", 0) for t in bank_txs)
-
-    diff = round(pms_total - bank_total, 2)
-    is_balanced = abs(diff) <= 0.01
-
-    # Step 3: 条数校验
+    # 1) 数量（交易笔数）
     pms_count = len(pms_txs)
     bank_count = len(bank_txs)
     count_match = pms_count == bank_count
 
-    # 逐笔匹配（同金额分组配对）
+    # 2) 金额合计
+    pms_total = round(sum(t.get("amount", 0) for t in pms_txs), 2)
+    bank_total = round(sum(t.get("amount", 0) for t in bank_txs), 2)
+    bank_fees = round(sum(t.get("fee", 0) for t in bank_txs), 2)
+
+    # 3) 金额差额（PMS - POS），相同则对平
+    diff = round(pms_total - bank_total, 2)
+    amount_match = abs(diff) <= AMOUNT_TOLERANCE
+
+    # 4) 逐笔配对（同金额分组），找出未匹配明细
     matched, unmatched_pms, unmatched_bank = _match_by_amount(pms_txs, bank_txs)
+
+    # 逐笔匹配：不存在任何未配对的短款/长款
+    all_matched = (len(unmatched_pms) == 0 and len(unmatched_bank) == 0)
+
+    # 完全对平必须同时满足：数量一致 + 金额一致 + 逐笔全部配对成功
+    # （避免「数量和总额都对得上，但实际是单笔错配互相抵消」的假对平）
+    balanced = count_match and amount_match and all_matched
 
     return {
         "channel": channel,
-        "pms_total": pms_total,
-        "bank_total": bank_total,
-        "diff": diff,
-        "bank_fees": bank_fees,
         "pms_count": pms_count,
         "bank_count": bank_count,
         "count_match": count_match,
+        "pms_total": pms_total,
+        "bank_total": bank_total,
+        "bank_fees": bank_fees,
+        "diff": diff,
+        "amount_match": amount_match,
+        "all_matched": all_matched,
+        "matched_count": len(matched),
+        "unmatched_pms_count": len(unmatched_pms),
+        "unmatched_bank_count": len(unmatched_bank),
+        "balanced": balanced,
         "matched": matched,
         "unmatched_pms": unmatched_pms,
         "unmatched_bank": unmatched_bank,
-        "balanced": is_balanced and count_match,
     }
