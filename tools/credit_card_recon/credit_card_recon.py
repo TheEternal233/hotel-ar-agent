@@ -8,7 +8,7 @@
   → 输出对账差异表格
 挂应收、挂房账、挂团队、OC、ENT、YFD 等付款方式不统计。
 """
-
+import gc
 import os
 
 try:
@@ -32,7 +32,7 @@ def _classify_files(data_dir):
     Returns:
         dict: {"pms_report": filename|None, "pos": filename|None}
     """
-    files = [f for f in os.listdir(data_dir) if f.endswith(".xlsx")]
+    files = [f for f in os.listdir(data_dir) if f.endswith(".xlsx") and not f.startswith("~$")]
     mapping = {"pms_report": None, "pos": None}
     for f in files:
         fl = f.lower()
@@ -85,8 +85,10 @@ def batch_card_recon(data_dir=None):
 def credit_card_recon(bank_statement_path: str = "", pms_card_path: str = "") -> str:
     """信用卡对账：对微信/支付宝/OTA卡/预付卡 4 种付款方式对账。
 
-    - 无参数：批量模式，自动读取 data/清远/信用卡对账 目录下文件。
-    - 传参：bank_statement_path 为 POS机银行流水路径，pms_card_path 为 PMS报表路径。
+    当用户上传了文件时，必须传入文件路径参数：
+    - bank_statement_path: POS机银行流水文件路径
+    - pms_card_path: PMS报表文件路径
+    仅当用户未提供任何文件时才可不传参（走批量模式）。
     """
     if not bank_statement_path and not pms_card_path:
         return batch_card_recon()
@@ -98,10 +100,13 @@ def credit_card_recon(bank_statement_path: str = "", pms_card_path: str = "") ->
 
     # _run_recon(pms_path, pos_path)：PMS报表在前，POS流水在后
     result=_run_recon(pms_card_path,bank_statement_path)
-    uploads_dir=os.path.join(BASE_DIR, "uploads")
-    for p in (bank_statement_path,pms_card_path):
+
+    # 强制垃圾回收，释放Excel文件句柄
+    gc.collect()
+    # 清理上传文件：直接删除，不做路径前缀检查
+    for p in (bank_statement_path, pms_card_path):
         try:
-            if p and os.path.exists(p) and os.path.abspath(p).startswith(os.path.abspath(uploads_dir)):
+            if p and os.path.exists(p):
                 os.remove(p)
         except OSError:
             pass

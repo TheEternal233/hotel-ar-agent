@@ -33,6 +33,15 @@ def _ensure_graph():
         _graph = build_graph()
     return _graph
 
+def _cleanup_uploads(file_paths: list[str]):
+    """AI处理完成后，清理 uploads 目录下的上传文件"""
+    for p in file_paths:
+        try:
+            fp=Path(p)
+            if fp.exists() and UPLOAD_DIR in fp.parents:
+                fp.unlink()
+        except OSError:
+            pass
 
 # ── Pydantic Models ──
 class ChatRequest(BaseModel):
@@ -120,6 +129,9 @@ async def chat(req: ChatRequest):
         cfg = {"configurable": {"thread_id": thread_id}}
         result = await graph.ainvoke(user_input, cfg)
         msgs = result.get("messages", [])
+
+        # 清理uploads下的上传文件
+        _cleanup_uploads(req.uploaded_files)
         return ChatResponse(
             response=msgs[-1].content if msgs else "",
             thread_id=thread_id,
@@ -152,6 +164,8 @@ async def chat_stream(req: ChatRequest):
                     yield f"data: {json.dumps({'type':'tool_end','name':event.get('name','')})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type':'error','content':str(e)}, ensure_ascii=False)}\n\n"
+        # AI处理完成后，清理uploads下的上传文件
+        _cleanup_uploads(req.uploaded_files)
         yield "data: [DONE]\n\n"
     return StreamingResponse(sse_gen(), media_type="text/event-stream",
                              headers={"Cache-Control":"no-cache","Connection":"keep-alive","X-Accel-Buffering":"no"})
@@ -197,9 +211,11 @@ async def card_recon(req: CardReconRequest):
     """信用卡对账：直接调用 credit_card_recon 工具"""
     try:
         result = credit_card_recon.invoke({"bank_statement_path": req.bank_statement_path, "pms_card_path": req.pms_card_path})
+        _cleanup_uploads([req.bank_statement_path, req.pms_card_path])
         return {"ok": True, "result": str(result)}
     except Exception as e:
         logger.error(f"Card recon error: {e}")
+        _cleanup_uploads([req.bank_statement_path, req.pms_card_path])
         raise HTTPException(status_code=500, detail=str(e))
 
 
