@@ -74,3 +74,186 @@ def _read_pos_statement(path):
             "raw": r,
         })
     return groups
+
+def _read_yfd_pms(path,channel_keyword):
+    """读取YFD PMS应收后台，按渠道关键词过滤借方记录
+
+    YFD PMS特征
+    - 表头在第一行
+    - 第 2 行通常是重复表头，靠「类型」列过滤排除。
+    - 只保留「借方」交易（贷方为退款/调账，不参与对账）。
+    - 按「姓名/描述」中的渠道关键词过滤（如 "YFD 支付宝"、"YFD微信"）。
+
+    Returns:
+        list: [{"amount", "bill_no", "raw"}, ...]
+
+    """
+    headers,rows=read_sheet(path,header_row=1)
+    txs=[]
+    for r in rows:
+        tx_type = str(r.get("类型", "")).strip()
+        if tx_type !="借方":
+            continue
+        desc=str(r.get("姓名/描述", "")or r.get("姓名 / 描述","")) .strip()
+        desc_nospace=desc.replace(" ","")
+        keyword_nospace=channel_keyword.replace(" ","")
+        if keyword_nospace not in desc_nospace:
+            continue
+
+        amt_val=r.get("金额",0)
+        try:
+            amount = float(amt_val) if amt_val is not None else 0
+        except (ValueError, TypeError):
+            continue
+        txs.append({
+            "amount": amount,
+            "bill_no": str(r.get("账单号","")),
+            "raw": r,
+        })
+
+    return txs
+
+
+
+
+def _read_yfd_bank(path):
+    """
+    读取 YFD 银行流水（ALIPAY / WECHAT 通用）。
+
+    YFD 银行流水特征：
+    - 表头在第 4 行（前 3 行为文件信息/商户信息）。
+    - 数据行以「文件信息」列 = "RD" 为标识。
+    - 列名可能带序号前缀（如 "10.金额"），需模糊匹配。
+
+    Returns:
+        list: [{"amount", "fee", "net", "tx_time", "raw"}, ...]
+    """
+
+    headers,rows = read_sheet(path,header_row=5)
+
+    #预扫描列名，建立模糊映射
+    amount_col=fee_col=net_col=tx_time_col=file_info_col=None
+    for h in headers:
+        hs=str(h).strip()
+        if not hs:
+            continue
+        if "文件信息" in hs:
+            file_info_col=h
+        elif "金额" in hs and "结算" not in hs and "佣金" not in hs:
+            amount_col=h
+        elif "服务佣金" in hs:
+            fee_col=h
+        elif "结算金额" in hs:
+            net_col=h
+        elif "交易时间" in hs:
+            tx_time_col=h
+
+    txs=[]
+    for r in rows:
+        #只保留RD数据行
+        if file_info_col:
+            if str(r.get(file_info_col,"")).strip()!="RD":
+                continue
+        else:
+            #兜底，取第一行判断
+            first_col=next(iter(r.keys())) if r else None
+            if first_col and str(r.get(first_col,"")).strip()!="RD":
+                continue
+
+        try:
+            amount = float(r.get(amount_col,0)) if amount_col else 0
+            fee=float(r.get(fee_col,0)) if fee_col else 0
+            net=float(r.get(net_col,0)) if net_col else 0
+        except (ValueError, TypeError):
+            continue
+
+        txs.append({
+            "amount": amount,
+            "fee": fee,
+            "net": net,
+            "tx_time":str(r.get(tx_time_col,"")) if tx_time_col else "",
+            "raw": r,
+        })
+
+    return txs
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
