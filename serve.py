@@ -16,7 +16,7 @@ from tools.protocol_settlement.aging_pms import aging_analysis, aging_and_notice
 from tools.ctrip_commission import ctrip_commission
 from tools.credit_card_recon import credit_card_recon
 from tools.data_integration import data_integration
-from tools.corp_recon import corp_recon
+
 from tools.invoice import invoice_gen
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -267,8 +267,8 @@ async def invoice_gen_endpoint(req: InvoiceRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/corp/recon")
-async def corp_recon_endpoint(req: CorpReconRequest):
+#@app.post("/api/corp/recon")
+#async def corp_recon_endpoint(req: CorpReconRequest):
     """协议客户对账"""
     try:
         result = corp_recon.invoke({"receivable_path": req.receivable_path})
