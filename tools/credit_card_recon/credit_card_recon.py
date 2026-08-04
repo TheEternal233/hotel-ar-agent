@@ -79,7 +79,7 @@ def _run_recon(pms_path, pos_path):
             recon_results.append(_reconcile_channel(method, pms_txs, pos_txs))
 
     # 3) 输出对账差异表格
-    return _generate_recon_report(recon_results)
+    return recon_results
 
 def _run_yfd_recon(pms_path, bank_path,channel_name,channel_keyword):
     """执行 YFD 单渠道对账：解析->服用通用匹配逻辑->返回单条结果"""
@@ -95,35 +95,33 @@ def batch_card_recon(data_dir=None):
     if not os.path.exists(data_dir):
         return f"错误：数据目录不存在: {data_dir}"
     files=_classify_files(data_dir)
-    recon_results=[]
-    # 通用对账
+    all_results=[]
+
+    #通用对账
     if files["pms_report"] and files["pos"]:
-        recon_results.extend(_run_recon(
+        all_results.extend(_run_recon(
             os.path.join(data_dir, files["pms_report"]),
-            os.path.join(data_dir, files["pos"]),
+            os.path.join(data_dir, files["pos"])
         ))
-    #YFD ALIPAY独立对账
+    # YFD ALIPAY独立对账
     if files["yfd_alipay_pms"] and files["yfd_alipay_bank"]:
-        recon_results.append(_run_yfd_recon(
+        all_results.append(_run_yfd_recon(
             os.path.join(data_dir, files["yfd_alipay_pms"]),
             os.path.join(data_dir, files["yfd_alipay_bank"]),
             "YFD支付宝","YFD 支付宝"
         ))
-    # YFD WECHAT独立对账
+    # YFD WECHAT 独立对账
     if files["yfd_wechat_pms"] and files["yfd_wechat_bank"]:
-        recon_results.append(_run_yfd_recon(
+        all_results.append(_run_yfd_recon(
             os.path.join(data_dir, files["yfd_wechat_pms"]),
             os.path.join(data_dir, files["yfd_wechat_bank"]),
-            "YFD微信","YFD 微信"
+            "YFD微信", "YFD 微信"
         ))
 
-
-    if not recon_results:
+    if not all_results:
         return "错误：未找到任何可对账的文件组合（通用 PMS/POS 或 YFD 文件对）"
 
-
-    return _generate_recon_report(recon_results)
-
+    return _generate_recon_report(all_results)
 
 
 
@@ -161,7 +159,8 @@ def credit_card_recon(bank_statement_path: str = "", pms_card_path: str = "") ->
         result=_generate_recon_report([recon_result])
     else:
         #通用PMS+POS对账
-        result=_run_recon(pms_card_path, bank_statement_path)
+        recon_results=_run_recon(pms_card_path, bank_statement_path)
+        result=_generate_recon_report(recon_results)
 
 
     # 强制垃圾回收，释放Excel文件句柄
