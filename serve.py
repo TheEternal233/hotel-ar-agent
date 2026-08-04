@@ -12,7 +12,7 @@ from graph import build_graph
 
 # 直接导入工具函数，绕开LLM直接调用
 from tools.ar_recon import ar_recon
-from tools.protocol_settlement.aging_pms import aging_analysis
+from tools.protocol_settlement.aging_pms import aging_analysis, aging_and_notice
 from tools.ctrip_commission import ctrip_commission
 from tools.credit_card_recon import credit_card_recon
 from tools.data_integration import data_integration
@@ -84,6 +84,12 @@ class ConfigRequest(BaseModel):
     action: str
     source_path: str = ""
 
+class AgingNoticeRequest(BaseModel):
+    receivable_path: str
+    as_of_date: str = ""
+    notice_month: str = ""
+    notice_date: str = ""
+    due_date: str = ""
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -197,12 +203,19 @@ async def ota_recon(req: OtaReconRequest):
 
 @app.post("/api/aging/analyze")
 async def aging_analyze(req: AgingRequest):
-    """账龄分析：直接调用 aging_analysis 工具"""
+    """账龄分析 + 付款通知书联合生成（前端无感知）"""
     try:
-        result = aging_analysis.invoke({"receivable_path": req.receivable_path, "as_of_date": req.as_of_date})
+        # 从截止日期推断账期月份，如 2026-07-31 -> 2026-07
+        notice_month = req.as_of_date[:7] if req.as_of_date else ""
+
+        result = aging_and_notice.invoke({
+            "receivable_path": req.receivable_path,
+            "as_of_date": req.as_of_date,
+            "notice_month": notice_month,
+        })
         return {"ok": True, "result": str(result)}
     except Exception as e:
-        logger.error(f"Aging error: {e}")
+        logger.error(f"Aging+Notice error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -329,4 +342,20 @@ async def scheduler_run(mode: str):
         return {"ok": True, "results": results}
     except Exception as e:
         logger.error(f"Scheduler {mode} error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/aging/notice")
+async def aging_notice(req: AgingNoticeRequest):
+    """账龄分析 + 付款通知书联合生成"""
+    try:
+        result = aging_and_notice.invoke({
+            "receivable_path": req.receivable_path,
+            "as_of_date": req.as_of_date,
+            "notice_month": req.notice_month,
+            "notice_date": req.notice_date,
+            "due_date": req.due_date,
+        })
+        return {"ok": True, "result": str(result)}
+    except Exception as e:
+        logger.error(f"Aging+Notice error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

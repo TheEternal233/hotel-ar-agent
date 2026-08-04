@@ -20,6 +20,7 @@ from openpyxl.styles import Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 from .doc_parser_pms import read_pms_receivable, _parse_date
+from .notice import generate_payment_notices
 
 # ========== 路径配置 ==========
 # 模板文件与工具脚本放在同级目录下
@@ -252,13 +253,10 @@ def _write_aging_report(result: Dict[str, Any], template_path: str, output_path:
 # ========== 前端可调用的Tool接口 ==========
 
 @tool
-def aging_analysis(receivable_path: str, as_of_date: str = "") -> str:
+def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=False) -> str:
     """PMS应收账龄分析：读取PMS应收账务列表xlsx，按协议单位分组汇总，以交易日期计算账龄，
     使用余额作为未核销金额，生成账龄分析报表。
 
-    Args:
-        receivable_path: PMS应收账务列表Excel文件路径
-        as_of_date: 分析截止日期，格式YYYY-MM-DD，默认为今天
     """
     if not os.path.exists(receivable_path):
         return f"错误：源文件不存在 {receivable_path}"
@@ -283,12 +281,7 @@ def aging_analysis(receivable_path: str, as_of_date: str = "") -> str:
     # 写入报表
     _write_aging_report(result, TEMPLATE_PATH, output_path)
 
-    # 处理完之后删除上传的源文件
-    try:
-        if os.path.exists(receivable_path):
-            os.remove(receivable_path)
-    except Exception:
-        pass
+
 
     # 构建返回摘要
     lines = [
@@ -299,6 +292,15 @@ def aging_analysis(receivable_path: str, as_of_date: str = "") -> str:
         "",
         "账龄分布:",
     ]
+
+    if not keep_source:
+        # 处理完之后删除上传的源文件
+        try:
+            if os.path.exists(receivable_path):
+                os.remove(receivable_path)
+        except Exception:
+            pass
+
     for _, bname, bkey in AGING_BRACKETS:
         val = result["grand_total"].get(bkey, 0)
         lines.append(f"  {bname}: {val:,.2f}")
@@ -309,3 +311,66 @@ def aging_analysis(receivable_path: str, as_of_date: str = "") -> str:
         lines.append(f"  {corp_name:30} 合计: {data['total']:>12,.2f}  账号: {data['account_no']}")
 
     return "\n".join(lines)
+
+
+@tool
+def aging_and_notice(
+    receivable_path: str,
+    as_of_date: str = "",
+    notice_month: str = "",
+    output_dir: str = "",
+    notice_date: str = "",
+    due_date: str = "",
+) -> str:
+    """PMS账龄分析与付款通知书联合生成
+
+    先执行应收账龄分析，再基于同一数据源为各协议客户生成付款通知书。
+    全部完成后统一删除源文件。
+
+    """
+    # 1. 账龄分析（保留源文件）
+    aging_result = aging_analysis.invoke({
+        "receivable_path": receivable_path,
+        "as_of_date": as_of_date,
+        "keep_source": True,
+    })
+    if aging_result.startswith("错误"):
+        return aging_result
+
+    # 2. 推断付款通知书账期
+    if not notice_month:
+        raw_records = read_pms_receivable(receivable_path)
+        dates = [r.get("date") for r in raw_records if r.get("date") and r.get("type") == "借方"]
+        if dates:
+            notice_month = max(dates).strftime("%Y-%m")
+        else:
+            notice_month = datetime.now().strftime("%Y-%m")
+
+    # 3. 生成付款通知书
+    notice_result = generate_payment_notices(
+        receivable_path=receivable_path,
+        notice_month=notice_month,
+        output_dir=output_dir,
+        notice_date=notice_date or None,
+        due_date=due_date or None,
+    )
+
+    # 4. 统一清理源文件
+    try:
+        if os.path.exists(receivable_path):
+            os.remove(receivable_path)
+    except Exception:
+        pass
+
+    # 5. 组合返回
+    return "\n".join([
+        "=" * 70,
+        "                     账龄分析 + 付款通知书 联合生成报告",
+        "=" * 70, "",
+        aging_result, "",
+        "-" * 70, "",
+        notice_result, "",
+        "=" * 70,
+        "全部任务完成，源文件已清理。",
+        "=" * 70,
+    ])
