@@ -1,5 +1,5 @@
 """付款通知书 — 通用工具函数"""
-
+import calendar
 import copy
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
@@ -19,8 +19,8 @@ def resolve_notice_month(notice_month: str) -> Tuple[datetime, datetime, str]:
 
     year, month = int(parts[0]), int(parts[1])
     month_start = datetime(year, month, 1)
-    next_month = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
-    month_end = next_month - timedelta(seconds=1)
+    last_day=calendar.monthrange(year, month)[1]
+    month_end = datetime(year,month,last_day,23,59,59)
     return month_start, month_end, f"{year}年{month}月消费"
 
 
@@ -30,16 +30,15 @@ def is_in_month(dt: Optional[datetime], month_start: datetime, month_end: dateti
 
 def calc_open_balance(records, corp: str, month_start: datetime) -> float:
     """计算上期余额（截至上月末的未核销借方余额）"""
-    total = 0.0
-    for rec in records:
-        if rec.get("effective_corp") != corp or rec.get("type") != "借方":
-            continue
-        rec_date = rec.get("date")
-        if rec_date is None or rec_date >= month_start:
-            continue
-        bal = rec.get("balance", 0)
-        if bal > 0:
-            total += bal
+    total=sum(
+        rec.get("balance",0.0)
+        for rec in records
+        if rec.get("effective_corp") == corp
+        and rec.get("type")=="借方"
+        and (d:=rec.get("date")) is not None
+        and d<month_start
+        and rec.get("balance",0)>0
+    )
     return round(total, 2)
 
 

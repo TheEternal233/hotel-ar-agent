@@ -1,11 +1,12 @@
 import os
+from pathlib import Path
+
 from openpyxl.styles import Border, Side
 
 # 模板路径
-NOTICE_TEMPLATE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "附件三 OTA 月度对账底稿付款通知书 模板.xlsx"
-)
+BASE_DIR=Path(__file__).resolve().parent
+NOTICE_TEMPLATE_PATH=BASE_DIR / "附件三 OTA 月度对账底稿付款通知书 模板.xlsx"
+DEFAULT_OUTPUT_DIR=BASE_DIR.parent.parent / "output" / "付款通知书"
 
 # 输出目录
 _CURR_FILE = os.path.abspath(__file__)

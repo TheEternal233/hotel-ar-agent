@@ -79,7 +79,7 @@ def _parse_amount(val)->float:
         except ValueError:
             return 0.0
     return 0.0
-
+_TAR_PATTERN=re.compile(r'TAr:([^;|]+)')
 def extract_corp_from_note(note:str)->Optional[str]:
     """
     从转账注释中提取协议单位（TAr字段）
@@ -90,24 +90,12 @@ def extract_corp_from_note(note:str)->Optional[str]:
     if not note:
         return None
     # 匹配TAr:XXX 或TAr:xxx/
-    m=re.search(r'TAr:([^;|]+)', note)
-    if m:
-        return m.group(1).strip()
-
-    return None
-
+    m=_TAR_PATTERN.search(note)
+    return m.group(1).strip() if m else None
 
 def normalize_corp_name(name:str)->str:
     """
-    读取PMS应收账务列表Excel，返回标准化记录列表
-
-    每条记录包含以下字段：
-        bill_no, type, date, checkout_time, name_desc, room,
-        amount, debit, credit, written_off, balance,
-        finance_note, note, transfer_note, checkout_bill,
-        dispute, order_no, ext_order, central_order,
-        corp, order_remark, operator,
-        corp_extracted（从转账注释提取的协议单位）
+    标准化协议单位名称：去除首尾空白及尾部'付款'字样
     """
 
     if not name:

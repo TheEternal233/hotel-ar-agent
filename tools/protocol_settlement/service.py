@@ -2,6 +2,7 @@
 
 import os
 import re
+import logging
 from datetime import datetime
 from typing import Optional, Dict
 
@@ -10,7 +11,7 @@ from .config import DEFAULT_OUTPUT_DIR, NOTICE_TEMPLATE_PATH
 from .utils import resolve_notice_month
 from .builder import build_corp_summary, fill_notice_template
 
-
+logger=logging.getLogger(__name__)
 def generate_payment_notices(
     receivable_path: str,
     notice_month: str,
