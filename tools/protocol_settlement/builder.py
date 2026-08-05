@@ -78,60 +78,62 @@ def fill_notice_template(corp_name: str, data: Dict[str, Any],
         raise FileNotFoundError(f"模板文件不存在: {template_path}")
 
     wb = load_workbook(template_path)
-    ws = wb.active
-    tr = TemplateRows
+    try:
+        ws = wb.active
+        tr = TemplateRows
 
-    # 抬头
-    ws.cell(row=tr.TO_CLIENT, column=1, value=f"致：{corp_name}")
-    ws.cell(row=tr.DATE, column=7, value=notice_date)
-    ws.cell(row=tr.DATE, column=7).number_format = "YYYY-MM-DD"
-    ws.cell(row=tr.SUBJECT, column=2, value=notice_month_display)
+        # 抬头
+        ws.cell(row=tr.TO_CLIENT, column=1, value=f"致：{corp_name}")
+        ws.cell(row=tr.DATE, column=7, value=notice_date)
+        ws.cell(row=tr.DATE, column=7).number_format = "YYYY-MM-DD"
+        ws.cell(row=tr.SUBJECT, column=2, value=notice_month_display)
 
-    # 上期余额
-    ws.cell(row=tr.OPEN_BALANCE, column=DetailCols.GUEST_NAME, value="上期余额")
-    ws.cell(row=tr.OPEN_BALANCE, column=DetailCols.AMOUNT, value=data["open_balance"])
-    ws.cell(row=tr.OPEN_BALANCE, column=DetailCols.AMOUNT).number_format = "#,##0.00"
+        # 上期余额
+        ws.cell(row=tr.OPEN_BALANCE, column=DetailCols.GUEST_NAME, value="上期余额")
+        ws.cell(row=tr.OPEN_BALANCE, column=DetailCols.AMOUNT, value=data["open_balance"])
+        ws.cell(row=tr.OPEN_BALANCE, column=DetailCols.AMOUNT).number_format = "#,##0.00"
 
-    # 消费明细
-    details = data["details"]
-    capacity = tr.DETAIL_END - tr.DETAIL_START + 1
-    extra_rows = 0
-    if len(details) > capacity:
-        extra_rows = len(details) - capacity
-        insert_rows_with_style(ws, tr.DETAIL_END, extra_rows)
+        # 消费明细
+        details = data["details"]
+        capacity = tr.DETAIL_END - tr.DETAIL_START + 1
+        extra_rows = 0
+        if len(details) > capacity:
+            extra_rows = len(details) - capacity
+            insert_rows_with_style(ws, tr.DETAIL_END, extra_rows)
 
-    adj_row = tr.ADJUSTMENT + extra_rows
-    total_row = tr.TOTAL + extra_rows
-    due_row = tr.PAYMENT_DUE + extra_rows
+        adj_row = tr.ADJUSTMENT + extra_rows
+        total_row = tr.TOTAL + extra_rows
+        due_row = tr.PAYMENT_DUE + extra_rows
 
-    for idx, detail in enumerate(details):
-        row = tr.DETAIL_START + idx
-        ws.cell(row=row, column=DetailCols.DATE, value=detail["date"]).number_format = "YYYY-MM-DD"
-        ws.cell(row=row, column=DetailCols.CONF_NO, value=detail["conf_no"])
-        ws.cell(row=row, column=DetailCols.GUEST_NAME, value=detail["guest_name"])
-        ws.cell(row=row, column=DetailCols.AMOUNT, value=detail["amount"]).number_format = "#,##0.00"
+        for idx, detail in enumerate(details):
+            row = tr.DETAIL_START + idx
+            ws.cell(row=row, column=DetailCols.DATE, value=detail["date"]).number_format = "YYYY-MM-DD"
+            ws.cell(row=row, column=DetailCols.CONF_NO, value=detail["conf_no"])
+            ws.cell(row=row, column=DetailCols.GUEST_NAME, value=detail["guest_name"])
+            ws.cell(row=row, column=DetailCols.AMOUNT, value=detail["amount"]).number_format = "#,##0.00"
 
-    if extra_rows == 0 and len(details) < capacity:
-        for row in range(tr.DETAIL_START + len(details), tr.DETAIL_END + 1):
-            for col in [DetailCols.DATE, DetailCols.CONF_NO, DetailCols.GUEST_NAME, DetailCols.AMOUNT]:
-                ws.cell(row=row, column=col).value = None
+        if extra_rows == 0 and len(details) < capacity:
+            for row in range(tr.DETAIL_START + len(details), tr.DETAIL_END + 1):
+                for col in [DetailCols.DATE, DetailCols.CONF_NO, DetailCols.GUEST_NAME, DetailCols.AMOUNT]:
+                    ws.cell(row=row, column=col).value = None
 
-    # 小数调整
-    adj = adjustment if adjustment is not None else data["adjustment"]
-    ws.cell(row=adj_row, column=DetailCols.GUEST_NAME, value="       小 数 调 整")
-    ws.cell(row=adj_row, column=DetailCols.AMOUNT, value=adj).number_format = "#,##0.00"
+        # 小数调整
+        adj = adjustment if adjustment is not None else data["adjustment"]
+        ws.cell(row=adj_row, column=DetailCols.GUEST_NAME, value="       小 数 调 整")
+        ws.cell(row=adj_row, column=DetailCols.AMOUNT, value=adj).number_format = "#,##0.00"
 
-    # 合计
-    update_sum_formula(ws, total_row, tr.OPEN_BALANCE, adj_row)
-    ws.cell(row=total_row, column=6, value="CNY")
-    ws.cell(row=total_row, column=DetailCols.AMOUNT).number_format = "#,##0.00"
+        # 合计
+        update_sum_formula(ws, total_row, tr.OPEN_BALANCE, adj_row)
+        ws.cell(row=total_row, column=6, value="CNY")
+        ws.cell(row=total_row, column=DetailCols.AMOUNT).number_format = "#,##0.00"
 
-    # 付款期限
-    if due_date is None:
-        due_date = notice_date + timedelta(days=DEFAULT_DUE_DAYS)
-    ws.cell(row=due_row, column=1, value=f"Payment Due Date: {due_date.strftime('%Y-%m-%d')}")
+        # 付款期限
+        if due_date is None:
+            due_date = notice_date + timedelta(days=DEFAULT_DUE_DAYS)
+        ws.cell(row=due_row, column=1, value=f"Payment Due Date: {due_date.strftime('%Y-%m-%d')}")
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    wb.save(output_path)
-    wb.close()
-    return output_path
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        wb.save(output_path)
+        return output_path
+    finally:
+        wb.close()

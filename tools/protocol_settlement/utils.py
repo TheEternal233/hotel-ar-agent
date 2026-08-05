@@ -97,16 +97,18 @@ def insert_rows_with_style(ws, insert_after_row: int, count: int):
                    f"{get_column_letter(mr.max_col)}{mr.max_row + rs}")
             try:
                 ws.merge_cells(rng)
-            except ValueError:
-                pass
+            except ValueError as e:
+                import warnings
+                warnings.warn(f"合并单元格失败 {rng}: {e}")
 
     for mr in merges_to_shift:
         rng = (f"{get_column_letter(mr.min_col)}{mr.min_row + count}:"
                f"{get_column_letter(mr.max_col)}{mr.max_row + count}")
         try:
             ws.merge_cells(rng)
-        except ValueError:
-            pass
+        except ValueError as e:
+            import warnings
+            warnings.warn(f"合并单元格失败 {rng}: {e}")
 
 
 def update_sum_formula(ws, total_row: int, first_data_row: int, last_data_row: int):

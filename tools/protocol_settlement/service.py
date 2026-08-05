@@ -119,14 +119,3 @@ try:
 except ImportError:
     payment_notice_tool = None
 
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 3:
-        print("用法: python -m tools.protocol_settlement.notice_service <应收账务列表.xlsx> <账期(YYYY-MM)> [通知书日期(YYYY-MM-DD)]")
-        sys.exit(1)
-    print(generate_payment_notices(
-        receivable_path=sys.argv[1],
-        notice_month=sys.argv[2],
-        notice_date=sys.argv[3] if len(sys.argv) > 3 else None,
-    ))
