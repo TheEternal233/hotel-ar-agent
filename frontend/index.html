@@ -142,6 +142,32 @@
   </div>
 </section>
 
+<!-- Daily Check Panel -->
+<section id="panel-daily" class="panel">
+  <div class="panel-header"><h2>每日核对工作台</h2><span class="hint">上传OTA和信用卡对账结果Excel，汇总生成夜审报告</span></div>
+  <div class="workbench">
+    <div class="wb-steps">
+      <div class="step active"><span>1</span>上传对账结果</div>
+      <div class="step"><span>2</span>汇总核对</div>
+      <div class="step"><span>3</span>生成夜审报告</div>
+    </div>
+    <div class="wb-form">
+      <div class="form-group">
+        <label>OTA对账结果 (.xlsx)</label>
+        <input type="file" id="dailyOtaFile" accept=".xlsx,.xls" multiple onchange="updateDailyFileList('dailyOtaFile','dailyOtaFileList')">
+        <div class="file-list" id="dailyOtaFileList"></div>
+      </div>
+      <div class="form-group">
+        <label>信用卡对账结果 (.xlsx)</label>
+        <input type="file" id="dailyCardFile" accept=".xlsx,.xls" multiple onchange="updateDailyFileList('dailyCardFile','dailyCardFileList')">
+        <div class="file-list" id="dailyCardFileList"></div>
+      </div>
+      <button class="btn-primary" onclick="runDailyCheck()">开始汇总</button>
+    </div>
+    <div class="wb-result" id="dailyResult"></div>
+  </div>
+</section>
+
 <!-- Batch Panel -->
 <section id="panel-batch" class="panel">
   <div class="panel-header"><h2>一键批量对账</h2><span class="hint">基于 data/清远/ 目录下的源数据自动执行全量对账</span></div>

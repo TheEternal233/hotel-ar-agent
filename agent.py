@@ -4,7 +4,7 @@ from tools.protocol_settlement.aging_pms import aging_analysis, aging_and_notice
 from tools.search import bocha_search
 from tools.ar_recon import ar_recon
 
-from tools.ctrip_commission import ctrip_commission
+from tools.ctrip_commission_reconcile.ctrip_commission import ctrip_commission
 from tools.daily_check import daily_night_audit_check
 from tools.daily_ar import daily_ar_processing
 from tools.credit_card_recon import credit_card_recon

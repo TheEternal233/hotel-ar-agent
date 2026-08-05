@@ -1,4 +1,4 @@
-"""M04: 携程佣金与付款通知工具"""
+"""M04: 携程佣金与工具"""
 import os, json
 from datetime import datetime
 from langchain.tools import tool

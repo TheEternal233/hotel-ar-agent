@@ -3,7 +3,7 @@ import json, os, logging, uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -13,11 +13,12 @@ from graph import build_graph
 # 直接导入工具函数，绕开LLM直接调用
 from tools.ar_recon import ar_recon
 from tools.protocol_settlement.aging_pms import aging_analysis, aging_and_notice
-from tools.ctrip_commission import ctrip_commission
+from tools.ctrip_commission_reconcile.ctrip_commission import ctrip_commission
 from tools.credit_card_recon import credit_card_recon
 from tools.data_integration import data_integration
 
 from tools.invoice import invoice_gen
+from tools.night_audit import daily_check_handler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -90,6 +91,10 @@ class AgingNoticeRequest(BaseModel):
     notice_month: str = ""
     notice_date: str = ""
     due_date: str = ""
+
+class DailyCheckRequest(BaseModel):
+    ota_paths: list[str] = []
+    card_paths: list[str] = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -216,6 +221,19 @@ async def aging_analyze(req: AgingRequest):
         return {"ok": True, "result": str(result)}
     except Exception as e:
         logger.error(f"Aging+Notice error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/daily/check")
+async def daily_check(req: DailyCheckRequest):
+    """每日核对工作台：汇总 OTA 和信用卡对账结果"""
+    try:
+        result = daily_check_handler(req.ota_paths, req.card_paths)
+        return {"ok": True, "result": str(result)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Daily check error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

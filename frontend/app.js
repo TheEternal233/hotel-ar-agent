@@ -194,17 +194,48 @@
     btnEnable(btn, "开始分析");
   };
 
-  // ===== Daily Check (专用端点) =====
+  // ===== Daily Check (专用端点，支持多文件) =====
+  window.updateDailyFileList = function(inputId, listId) {
+    var input = document.getElementById(inputId);
+    var list = document.getElementById(listId);
+    if (!input || !list) return;
+    var files = Array.from(input.files);
+    list.innerHTML = files.map(function(f) {
+      return '<div class="file-tag"><span class="file-name">' + f.name + '</span><span class="file-size">' + (f.size/1024).toFixed(1) + 'KB</span></div>';
+    }).join('');
+  };
+
+  async function uploadMultipleAndGetPaths(fileInputId) {
+    var input = document.getElementById(fileInputId);
+    if (!input || !input.files.length) return [];
+    var paths = [];
+    for (var i = 0; i < input.files.length; i++) {
+      var fd = new FormData(); fd.append("file", input.files[i]);
+      var r = await fetch(API + "/upload", { method: "POST", body: fd });
+      var d = await r.json(); uploadedFiles.push(d);
+      paths.push(d.path);
+    }
+    return paths;
+  }
+
   window.runDailyCheck = async function() {
     var btn = document.querySelector("#panel-daily .btn-primary");
-    btnDisable(btn); showLoading("dailyResult");
+    btnDisable(btn, "上传中..."); showLoading("dailyResult");
     try {
-      var night = await uploadAndGetPath("nightFile"), ar = await uploadAndGetPath("arLedgerFile");
-      if (!night || !ar) { setResult("dailyResult", "错误：请上传两个文件"); btnEnable(btn, "开始核对"); return; }
-      var resp = await apiPost("/daily/check", { night_report_path: night, ar_ledger_path: ar });
+      var otaPaths = await uploadMultipleAndGetPaths("dailyOtaFile");
+      var cardPaths = await uploadMultipleAndGetPaths("dailyCardFile");
+      if (!otaPaths.length && !cardPaths.length) {
+        setResult("dailyResult", "错误：请至少上传OTA对账结果或信用卡对账结果");
+        btnEnable(btn, "开始汇总"); return;
+      }
+      btnDisable(btn, "汇总中...");
+      var resp = await apiPost("/daily/check", {
+        ota_paths: otaPaths,
+        card_paths: cardPaths
+      });
       setResult("dailyResult", resp.ok ? resp.result : ("错误：" + (resp.detail || "未知")));
     } catch(e) { setResult("dailyResult", "错误：" + e.message); }
-    btnEnable(btn, "开始核对");
+    btnEnable(btn, "开始汇总");
   };
 
   // ===== Daily AR (专用端点 + 文件上传) =====
