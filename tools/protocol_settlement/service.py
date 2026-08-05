@@ -107,7 +107,7 @@ try:
         notice_date: str = "",
         due_date: str = "",
     ) -> str:
-        """PMS付款通知书生成"""
+        """PMS付款通知书生成，利用该工具可以生成对应的付款通知单"""
         return generate_payment_notices(
             receivable_path=receivable_path,
             notice_month=notice_month,

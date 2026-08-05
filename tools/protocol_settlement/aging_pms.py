@@ -253,10 +253,11 @@ def _write_aging_report(result: Dict[str, Any], template_path: str, output_path:
 # ========== 前端可调用的Tool接口 ==========
 
 @tool
-def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=False) -> str:
+def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=False,generate_notice: bool = True) -> str:
     """PMS应收账龄分析：读取PMS应收账务列表xlsx，按协议单位分组汇总，以交易日期计算账龄，
     使用余额作为未核销金额，生成账龄分析报表。
 
+    默认同时生成付款通知书
     """
     if not os.path.exists(receivable_path):
         return f"错误：源文件不存在 {receivable_path}"
@@ -281,6 +282,31 @@ def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=F
     # 写入报表
     _write_aging_report(result, TEMPLATE_PATH, output_path)
 
+    # 默认生成付款通知书
+    notice_result=""
+    if generate_notice and os.path.exists(output_path):
+        try:
+            # 推断账期月份
+            row_records=read_pms_receivable(receivable_path)
+            dates=[r.get("date") for r in row_records if r.get("date") and r.get("type")=="借方"]
+            if dates:
+                notice_month=max(dates).strftime("%Y-%m")
+            else:
+                notice_month=datetime.now().strftime("%Y-%m")
+            notice_result=generate_payment_notices(
+                receivable_path=receivable_path,
+                notice_month=notice_month,
+            )
+        except Exception as e:
+            notice_result=f"付款通知书生成失败:{e}"
+
+    if not keep_source:
+        # 处理完之后删除上传的源文件
+        try:
+            if os.path.exists(receivable_path):
+                os.remove(receivable_path)
+        except Exception:
+            pass
 
 
     # 构建返回摘要
@@ -293,13 +319,7 @@ def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=F
         "账龄分布:",
     ]
 
-    if not keep_source:
-        # 处理完之后删除上传的源文件
-        try:
-            if os.path.exists(receivable_path):
-                os.remove(receivable_path)
-        except Exception:
-            pass
+
 
     for _, bname, bkey in AGING_BRACKETS:
         val = result["grand_total"].get(bkey, 0)
@@ -309,6 +329,15 @@ def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=F
     lines.append("客户明细:")
     for corp_name, data in sorted(result["customers"].items(), key=lambda x: -x[1]["total"]):
         lines.append(f"  {corp_name:30} 合计: {data['total']:>12,.2f}  账号: {data['account_no']}")
+
+    if notice_result:
+        lines.extend([
+            "",
+            "=" * 60,
+            "                   付款通知书生成结果",
+            "=" * 60,
+            notice_result,
+        ])
 
     return "\n".join(lines)
 
@@ -333,6 +362,7 @@ def aging_and_notice(
         "receivable_path": receivable_path,
         "as_of_date": as_of_date,
         "keep_source": True,
+        "generate_notice": False, #避免重复生成
     })
     if aging_result.startswith("错误"):
         return aging_result

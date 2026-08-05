@@ -15,7 +15,7 @@ RED_FILL = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="soli
 
 @tool
 def ctrip_commission(settlement_path: str) -> str:
-    """携程佣金计算与付款通知：读取携程结算单xlsx，自动计算佣金、生成付款通知单、标注差异分类。"""
+    """携程佣金计算：读取携程结算单xlsx，自动计算佣金、标注差异分类。"""
     if not os.path.exists(settlement_path):
         return f"error: file not found {settlement_path}"
     cfg_path = os.path.join(CONFIG_DIR, "account_mapping.json")
