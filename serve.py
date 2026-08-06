@@ -73,6 +73,7 @@ class CardReconRequest(BaseModel):
 
 class CtripRequest(BaseModel):
     settlement_path: str
+    pms_path: str = ""
 
 class InvoiceRequest(BaseModel):
     receivable_path: str
@@ -254,7 +255,10 @@ async def card_recon(req: CardReconRequest):
 async def ctrip_commission_endpoint(req: CtripRequest):
     """携程佣金：直接调用 ctrip_commission 工具"""
     try:
-        result = ctrip_commission.invoke({"settlement_path": req.settlement_path})
+        result = ctrip_commission.invoke({
+            "ctrip_filename": req.settlement_path,
+            "pms_filename": req.pms_path,
+        })
         return {"ok": True, "result": str(result)}
     except Exception as e:
         logger.error(f"Ctrip commission error: {e}")
@@ -349,7 +353,11 @@ async def scheduler_run(mode: str):
             # 携程佣金需要单独的结算单
             ctrip_files = [f for f in upload_map if "携程" in f or "ctrip" in f.lower()]
             if ctrip_files:
-                r = ctrip_commission.invoke({"settlement_path": upload_map[ctrip_files[0]]})
+                pms_files = [f for f in upload_map if "pms" in f.lower()]
+                r = ctrip_commission.invoke({
+                    "ctrip_filename": upload_map[ctrip_files[0]],
+                    "pms_filename": upload_map[pms_files[0]] if pms_files else "",
+                })
                 results.append(f"[携程佣金] {r}")
             if not results:
                 results.append("uploads目录下未找到匹配文件，请先上传数据文件")

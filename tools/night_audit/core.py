@@ -1,7 +1,6 @@
 """night_audit 核心：汇总 OTA 与信用卡对账结果到单一 Excel"""
 
-import os
-from pathlib import Path
+
 from typing import List
 
 from openpyxl import load_workbook, Workbook
@@ -28,9 +27,9 @@ def _read_first_sheet_rows(wb_path: str) -> List[List]:
         wb.close()
 
 
-# ═══════════════════════════════════════════════════════════════════
-#  带样式读取（新增）
-# ═══════════════════════════════════════════════════════════════════
+
+#  带样式读取
+
 def _cell_info(cell):
     """提取单元格的值和关键样式（填充色、字体颜色、粗体）"""
     info = {"value": cell.value}
@@ -73,9 +72,8 @@ def _read_first_sheet_rows_with_style(wb_path: str) -> List[List[dict]]:
         wb.close()
 
 
-# ═══════════════════════════════════════════════════════════════════
+
 #  写入函数升级：支持纯值或 dict 样式
-# ═══════════════════════════════════════════════════════════════════
 def _copy_rows_to_ws(ws, rows: List[List], start_row: int = 1) -> int:
     """将行数据写入 worksheet，支持纯值或 dict 样式，返回最后写入的行号"""
     for r_idx, row in enumerate(rows, start=start_row):

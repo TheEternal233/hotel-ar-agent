@@ -1,13 +1,13 @@
 """付款通知书 — 通用工具函数"""
 import calendar
 import copy
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Tuple
 
 from openpyxl.styles import Font, Alignment, PatternFill, Border
 from openpyxl.utils import get_column_letter
 
-from .config import TemplateRows, DetailCols, DEFAULT_ADJUSTMENT
+from .config import DetailCols
 
 
 def resolve_notice_month(notice_month: str) -> Tuple[datetime, datetime, str]:

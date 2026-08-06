@@ -217,9 +217,11 @@
     var btn = document.querySelector("#panel-ctrip .btn-primary");
     btnDisable(btn); showLoading("ctripResult");
     try {
-      var path = await uploadAndGetPath("ctripFile");
-      if (!path) { setResult("ctripResult", "Error: Please upload Ctrip settlement"); btnEnable(btn, "Calculate Commission"); return; }
-      var resp = await callChat("\u643a\u7a0b\u4f63\u91d1\u8ba1\u7b97 \u6587\u4ef6:" + path);
+      var ctripPath = await uploadAndGetPath("ctripFile");
+      if (!ctripPath) { setResult("ctripResult", "Error: Please upload Ctrip settlement"); btnEnable(btn, "Calculate Commission"); return; }
+      var pmsPath = await uploadAndGetPath("ctripPmsFile");
+      if (!pmsPath) { setResult("ctripResult", "Error: Please upload PMS data"); btnEnable(btn, "Calculate Commission"); return; }
+      var resp = await callChat("携程佣金计算 结算单:" + ctripPath + " PMS:" + pmsPath);
       setResult("ctripResult", resp);
     } catch(e) { setResult("ctripResult", "Error: " + e.message); }
     btnEnable(btn, "Calculate Commission");

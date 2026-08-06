@@ -6,13 +6,12 @@ from typing import Dict, Any, List, Optional
 
 from openpyxl import load_workbook
 
-from .doc_parser_pms import read_pms_receivable, _parse_date
 from .config import (
     TemplateRows, DetailCols, DEFAULT_ADJUSTMENT, DEFAULT_DUE_DAYS,
     NOTICE_TEMPLATE_PATH, THIN_BORDER,
 )
 from .utils import (
-    resolve_notice_month, is_in_month, calc_open_balance,
+    is_in_month, calc_open_balance,
     insert_rows_with_style, update_sum_formula,
 )
 

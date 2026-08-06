@@ -10,7 +10,6 @@
 """
 import gc
 import os
-from importlib.metadata import files
 
 try:
     from langchain.tools import tool

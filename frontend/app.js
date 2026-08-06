@@ -289,9 +289,11 @@
     var btn = document.querySelector("#panel-ctrip .btn-primary");
     btnDisable(btn); showLoading("ctripResult");
     try {
-      var path = await uploadAndGetPath("ctripFile");
-      if (!path) { setResult("ctripResult", "错误：请上传携程结算单"); btnEnable(btn, "计算佣金"); return; }
-      var resp = await apiPost("/ctrip/commission", { settlement_path: path });
+      var ctripPath = await uploadAndGetPath("ctripFile");
+      if (!ctripPath) { setResult("ctripResult", "错误：请上传携程结算单"); btnEnable(btn, "计算佣金"); return; }
+      var pmsPath = await uploadAndGetPath("ctripPmsFile");
+      if (!pmsPath) { setResult("ctripResult", "错误：请上传PMS营业数据"); btnEnable(btn, "计算佣金"); return; }
+      var resp = await apiPost("/ctrip/commission", { settlement_path: ctripPath, pms_path: pmsPath });
       setResult("ctripResult", resp.ok ? resp.result : ("错误：" + (resp.detail || "未知")));
     } catch(e) { setResult("ctripResult", "错误：" + e.message); }
     btnEnable(btn, "计算佣金");
