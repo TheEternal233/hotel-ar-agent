@@ -1,5 +1,7 @@
 from langchain_core.messages import SystemMessage
 
+from tools import night_audit
+from tools.night_audit import night_audit_tool
 from tools.protocol_settlement.aging_pms import aging_analysis, aging_and_notice
 from tools.search import bocha_search
 from tools.ar_recon import ar_recon
@@ -17,6 +19,7 @@ TOOLS = [bocha_search,
          aging_analysis,
          aging_and_notice,
          ctrip_commission,
+         night_audit_tool,
          daily_night_audit_check,
          daily_ar_processing,
          credit_card_recon,
