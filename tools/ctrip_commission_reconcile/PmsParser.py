@@ -5,9 +5,12 @@ PmsParser
 解析酒店 PMS 退房/结账明细，
 提取：房号、离店日、房价、客人姓名。
 """
+import logging
+from typing import List, Dict, Any
+
 from tools.doc_parser import read_mapped
 
-
+logger=logging.getLogger(__name__)
 class PmsParser:
     """PMS 账单解析器"""
 
@@ -20,13 +23,18 @@ class PmsParser:
         "order_id":   ["订单号", "外部订单号", "携程订单号", "Order No", "Ext Order"],
     }
 
-    def parse(self, path, sheet_name=None, header_row=1):
-        raw = read_mapped(
-            path=path,
-            column_map=self.COLUMN_MAP,
-            header_row=header_row,
-            sheet_name=sheet_name,
-        )
+    def parse(self, path:str, sheet_name:str=None, header_row:int=1)->List[Dict[str,Any]]:
+        """解析PMS明细"""
+        try:
+            raw = read_mapped(
+                path=path,
+                column_map=self.COLUMN_MAP,
+                header_row=header_row,
+                sheet_name=sheet_name,
+            )
+        except Exception as e:
+            logger.error(f"读取PMS文件失败:{e}")
+            raise ValueError(f"无法解析 PMS 文件，请检查列名是否包含房号/离店日期/房价等字段")
 
         records = []
         for rec in raw:
@@ -50,7 +58,7 @@ class PmsParser:
                     "guest_name": rec.get("guest_name"),
                     "order_id":   rec.get("order_id"),
                 })
-
+        logger.info(f"PMS解析完成:{len(records)}条记录")
         return records
 
     @staticmethod

@@ -18,9 +18,8 @@ TOOLS = [bocha_search,
          ar_recon,
          aging_analysis,
          aging_and_notice,
-         ctrip_commission,
          night_audit_tool,#每日夜审汇总
-         ctrip_commission,
+         ctrip_commission,#携程佣金
          daily_night_audit_check,
          daily_ar_processing,
          credit_card_recon,

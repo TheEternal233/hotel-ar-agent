@@ -289,15 +289,6 @@ async def invoice_gen_endpoint(req: InvoiceRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-#@app.post("/api/corp/recon")
-#async def corp_recon_endpoint(req: CorpReconRequest):
-    """协议客户对账"""
-    try:
-        result = corp_recon.invoke({"receivable_path": req.receivable_path})
-        return {"ok": True, "result": str(result)}
-    except Exception as e:
-        logger.error(f"Corp recon error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/batch/ota")
