@@ -6,9 +6,11 @@ PmsParser
 提取：房号、离店日、房价、客人姓名。
 """
 import logging
+import re
 from typing import List, Dict, Any
-
+from datetime import datetime,timedelta
 from tools.doc_parser import read_mapped
+from utils.common_func import _clean_val
 
 logger=logging.getLogger(__name__)
 class PmsParser:
@@ -38,15 +40,23 @@ class PmsParser:
 
         records = []
         for rec in raw:
+            room_no=_clean_val(rec.get("room_no"))
+            guest_name=_clean_val(rec.get("guest_name"))
+            checkout_row=_clean_val(rec.get("checkout"))
+            room_price_row=_clean_val(rec.get("room_price"))
+            order_id=_clean_val(rec.get("order_id"))
             # 跳过空行
-            if not rec.get("room_no") and not rec.get("guest_name"):
+            if not room_no and not guest_name:
                 continue
 
-            checkout = self._fmt_date(rec.get("checkout"))
-            room_price = self._fmt_num(rec.get("room_price"))
+            checkout = self._fmt_date(checkout_row)
+            room_price = self._fmt_num(room_price_row,default=None)
 
             # 处理多房号（部分 PMS 会写成 "801,802"）
-            room_raw = str(rec.get("room_no") or "")
+            room_raw = str(room_no or "")
+            # 处理Excel数字格式带来的.0后缀
+            if "." in room_raw:
+                room_raw=room_raw.rstrip("0").rstrip(".")
             for rid in room_raw.split(","):
                 rid = rid.strip()
                 if not rid:
@@ -55,35 +65,72 @@ class PmsParser:
                     "room_no":    rid,
                     "checkout":   checkout,
                     "room_price": room_price,
-                    "guest_name": rec.get("guest_name"),
-                    "order_id":   rec.get("order_id"),
+                    "guest_name": guest_name,
+                    "order_id":   order_id,
                 })
         logger.info(f"PMS解析完成:{len(records)}条记录")
         return records
 
     @staticmethod
     def _fmt_date(val):
-        if hasattr(val, "strftime"):
-            return val.strftime("%Y-%m-%d")
-        if isinstance(val, str) and val.strip():
-            from datetime import datetime
-            for fmt in ["%Y/%m/%d", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S"]:
+        if val is None or val == "":
+            return None
+
+        try:
+            if hasattr(val, "strftime"):
+                return val.strftime("%Y-%m-%d")
+        except (ValueError,AttributeError):
+            return None
+
+        # Excel序列号
+        if isinstance(val, (int,float)) and not isinstance(val,bool):
+            if 1<=val<=50000:
                 try:
-                    return datetime.strptime(val.strip(), fmt).strftime("%Y-%m-%d")
+                    d=datetime(1899,12,31)+timedelta(days=int(val))
+                    return d.strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+
+        #字符串解析
+        if isinstance(val,str):
+            s=val.strip()
+            if not s:
+                return None
+            # 中文日期：2024年1月5日、2024年01月05日
+            m = re.match(r"(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})[日]?", s)
+            if m:
+                try:
+                    y,mth,d=map(int,m.groups())
+                    return datetime(y,mth,d).strftime("%Y-%m-%d")
                 except ValueError:
                     pass
+
+            # 标准格式
+            for fmt in [
+                "%Y/%m/%d", "%Y-%m-%d", "%Y%m%d",
+                "%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S",
+                "%d/%m/%Y", "%m/%d/%Y",
+            ]:
+                try:
+                    return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+
+
+
+
         return val
 
     @staticmethod
-    def _fmt_num(val):
+    def _fmt_num(val,default=0.0):
         if val is None:
-            return 0.0
+            return default
         if isinstance(val, (int, float)):
             return float(val)
         try:
             return float(str(val).replace(",", "").replace("，", ""))
         except (ValueError, TypeError):
-            return 0.0
+            return default
 
 
 if __name__ == "__main__":
