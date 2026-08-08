@@ -449,14 +449,17 @@
   window.cleanupDir = async function(dirType) {
     if (!confirm("确定清空 " + dirType + " 目录下的所有文件？此操作不可恢复！")) return;
     try {
+      var subPath = window._fileMgrState[dirType] || "";
+      var body = {dir_type: dirType};
+      if (subPath) body.sub_path = subPath;
       var r = await fetch(API + "/files/cleanup", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({dir_type: dirType})
+        body: JSON.stringify(body)
       });
       var d = await r.json();
       if (d.ok) {
-        loadFileList(dirType);
+        loadFileList(dirType, subPath);
       } else {
         alert("清理失败: " + (d.detail || "未知"));
       }

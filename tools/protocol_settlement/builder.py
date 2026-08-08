@@ -1,9 +1,11 @@
 """付款通知书 — 数据构建与模板填充"""
 
 import os
+import shutil
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, Any, List, Optional
-
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl import load_workbook
 
 from .config import (
@@ -76,7 +78,9 @@ def fill_notice_template(corp_name: str, data: Dict[str, Any],
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"模板文件不存在: {template_path}")
 
-    wb = load_workbook(template_path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    shutil.copy(template_path, output_path)
+    wb = load_workbook(output_path)
     try:
         ws = wb.active
         tr = TemplateRows
@@ -132,6 +136,13 @@ def fill_notice_template(corp_name: str, data: Dict[str, Any],
         ws.cell(row=due_row, column=1, value=f"Payment Due Date: {due_date.strftime('%Y-%m-%d')}")
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        logo_path = Path(__file__).parent / "logo.png"  # 把 logo.png 放在同一目录
+        if logo_path.exists():
+            logo = XLImage(str(logo_path))
+            logo.width = 180
+            logo.height = 60
+            ws.add_image(logo, "C3")
         wb.save(output_path)
         return output_path
     finally:

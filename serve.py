@@ -1,5 +1,6 @@
 """酒店应收会计AI智能体 — FastAPI Web服务 + 静态前端 + 专用模块端点"""
 import json, os, logging, uuid
+import shutil
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -440,15 +441,18 @@ async def list_files(dir_type: str, sub_path: str = ""):
 
 @app.post("/api/files/delete")
 async def delete_file(req: FileDeleteRequest):
-    """删除uploads或output下的指定文件"""
+    """删除uploads或output下的指定文件或文件夹"""
     try:
         fp=Path(req.path).resolve()
         if not (_is_safe_path(fp,UPLOAD_DIR) or _is_safe_path(fp,OUTPUT_DIR)):
             raise HTTPException(status_code=403,detail="只能删除uploads或output目录下的文件")
         if not fp.exists():
-            raise HTTPException(status_code=404,detail="文件不存在")
+            raise HTTPException(status_code=404,detail="文件或文件夹不存在")
 
-        fp.unlink()
+        if fp.is_dir():
+            shutil.rmtree(fp)
+        else:
+            fp.unlink()
         return {"ok": True,"message":f"已删除: {fp.name}"}
 
     except HTTPException:
@@ -461,23 +465,31 @@ async def delete_file(req: FileDeleteRequest):
 async def cleanup_directory(req:dict):
     """清空指定目录uploads或output"""
     dir_type=req.get("dir_type","")
+    sub_path=req.get("sub_path","")
     if dir_type == "uploads":
-        target_dir=UPLOAD_DIR
+        base_dir=UPLOAD_DIR
     elif dir_type == "output":
-        target_dir=OUTPUT_DIR
+        base_dir=OUTPUT_DIR
     else:
         raise HTTPException(status_code=400,detail="dir_type必须是uploads或output")
+
+    target_dir = base_dir / sub_path if sub_path else base_dir
+    if not _is_safe_path(target_dir.resolve(), base_dir):
+        raise HTTPException(status_code=403,detail="路径越界")
 
     deleted=0
     for f in target_dir.iterdir():
         if f.is_file():
             try:
-                f.unlink()
+                if f.is_dir():
+                    shutil.rmtree(f)
+                else:
+                    f.unlink()
                 deleted+=1
             except OSError:
                 pass
 
-    return {"ok":True, "message":f"已清理{deleted}个文件"}
+    return {"ok":True, "message":f"已清理{deleted}个文件或文件夹"}
 
 
 @app.get("/api/download")
@@ -488,36 +500,3 @@ async def download_file(path: str):
     if not fp.exists():
         raise HTTPException(status_code=404, detail="...")
     return FileResponse(path=fp, filename=fp.name, media_type="application/octet-stream")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
