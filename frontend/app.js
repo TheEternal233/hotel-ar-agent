@@ -358,34 +358,67 @@
     addMsg("system", "[审批] 审批队列将在部署时配置");
   };
     // ===== File Manager =====
-  window.loadFileList = async function(dirType) {
+  window._fileMgrState = window._fileMgrState || {};
+
+  window.loadFileList = async function(dirType, subPath) {
+    subPath = subPath || "";
+    window._fileMgrState[dirType] = subPath;
     var elId = dirType + "List";
     var el = document.getElementById(elId);
     if (!el) return;
     el.innerHTML = '<div class="filemgr-loading">加载中...</div>';
     try {
-      var r = await fetch(API + "/files?dir_type=" + dirType);
+      var url = API + "/files?dir_type=" + dirType;
+      if (subPath) url += "&sub_path=" + encodeURIComponent(subPath);
+      var r = await fetch(url);
       var d = await r.json();
+
+      // 面包屑
+      var breadcrumb = '';
+      if (subPath) {
+        breadcrumb = '<div class="filemgr-breadcrumb">' +
+          '<a href="#" onclick="loadFileList(\'' + dirType + '\', \'\');return false">根目录</a>';
+        var parts = subPath.split('/');
+        var cumul = '';
+        for (var p = 0; p < parts.length; p++) {
+          cumul += (cumul ? '/' : '') + parts[p];
+          breadcrumb += ' / <a href="#" onclick="loadFileList(\'' + dirType + '\', \'' + cumul + '\');return false">' + parts[p] + '</a>';
+        }
+        breadcrumb += '</div>';
+      }
+
       if (!d.ok || !d.files.length) {
-        el.innerHTML = '<div class="filemgr-empty">暂无文件</div>';
+        el.innerHTML = breadcrumb + '<div class="filemgr-empty">暂无文件</div>';
         return;
       }
-      var html = '<table class="filemgr-table"><thead><tr>' +
+
+      var html = breadcrumb + '<table class="filemgr-table"><thead><tr>' +
         '<th>文件名</th><th>大小</th><th>修改时间</th><th>操作</th>' +
         '</tr></thead><tbody>';
       for (var i = 0; i < d.files.length; i++) {
         var f = d.files[i];
-        var size = f.size < 1024 ? f.size + " B" :
-                   f.size < 1048576 ? (f.size / 1024).toFixed(1) + " KB" :
-                   (f.size / 1048576).toFixed(1) + " MB";
-        html += '<tr>' +
-          '<td class="fname" title="' + f.path + '">' + f.name + '</td>' +
-          '<td>' + size + '</td>' +
-          '<td>' + f.mtime + '</td>' +
-          '<td class="fops">' +
-          '<a class="btn-xs" href="' + f.download_url + '" download>下载</a>' +
-          '<button class="btn-xs btn-danger" onclick="deleteFile(\'' + f.path.replace(/\\/g, "\\\\") + '\', \'' + dirType + '\')">删除</button>' +
-          '</td></tr>';
+        if (f.is_dir) {
+          html += '<tr>' +
+            '<td class="fname">📁 ' + f.name + '</td>' +
+            '<td>-</td>' +
+            '<td>' + f.mtime + '</td>' +
+            '<td class="fops">' +
+            '<button class="btn-xs btn-primary" onclick="loadFileList(\'' + dirType + '\', \'' + (subPath ? subPath + '/' : '') + f.name + '\')">进入</button>' +
+            '<button class="btn-xs btn-danger" onclick="deleteFile(\'' + f.path.replace(/\\/g, "\\\\") + '\', \'' + dirType + '\')">删除</button>' +
+            '</td></tr>';
+        } else {
+          var size = f.size < 1024 ? f.size + " B" :
+                     f.size < 1048576 ? (f.size / 1024).toFixed(1) + " KB" :
+                     (f.size / 1048576).toFixed(1) + " MB";
+          html += '<tr>' +
+            '<td class="fname" title="' + f.path + '">' + f.name + '</td>' +
+            '<td>' + size + '</td>' +
+            '<td>' + f.mtime + '</td>' +
+            '<td class="fops">' +
+            '<a class="btn-xs" href="' + f.download_url + '" download>下载</a>' +
+            '<button class="btn-xs btn-danger" onclick="deleteFile(\'' + f.path.replace(/\\/g, "\\\\") + '\', \'' + dirType + '\')">删除</button>' +
+            '</td></tr>';
+        }
       }
       html += '</tbody></table>';
       el.innerHTML = html;

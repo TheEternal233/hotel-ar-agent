@@ -401,32 +401,41 @@ async def aging_notice(req: AgingNoticeRequest):
 
 
 @app.get("/api/files")
-async def list_files(dir_type:str):
-    """列出uploads或output下的文件"""
+async def list_files(dir_type: str, sub_path: str = ""):
+    """列出uploads或output下的文件和文件夹"""
     if dir_type == "uploads":
-        target_dir=UPLOAD_DIR
+        base_dir = UPLOAD_DIR
     elif dir_type == "output":
-        target_dir=OUTPUT_DIR
+        base_dir = OUTPUT_DIR
     else:
         raise HTTPException(status_code=400, detail="dir_type必须是uploads或output")
 
-
+    target_dir = base_dir / sub_path if sub_path else base_dir
     if not target_dir.exists():
-        return {"ok": True, "files": []}
+        return {"ok": True, "files": [], "current_path": sub_path}
 
-    files=[]
-    for f in sorted(target_dir.iterdir(),key=lambda x:x.stat().st_mtime,reverse=True):
-        if f.is_file():
-            stat=f.stat()
-            files.append({
-                "name": f.name,
-                "path": str(f),
-                "size": stat.st_size,
-                "mtime":datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                "download_url": f"/api/download?path={str(f)}",
-            })
+    # 安全检查
+    if not _is_safe_path(target_dir.resolve(), base_dir):
+        raise HTTPException(status_code=403, detail="路径越界")
 
-    return {"ok": True, "files": files}
+    items = []
+    for f in sorted(target_dir.iterdir(), key=lambda x: (not x.is_dir(), x.stat().st_mtime), reverse=False):
+        stat = f.stat()
+        item = {
+            "name": f.name,
+            "path": str(f),
+            "is_dir": f.is_dir(),
+            "mtime": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if f.is_dir():
+            item["open_url"] = f"/api/files?dir_type={dir_type}&sub_path={sub_path + '/' + f.name if sub_path else f.name}"
+        else:
+            item["size"] = stat.st_size
+            item["download_url"] = f"/api/download?path={str(f)}"
+        items.append(item)
+
+    return {"ok": True, "files": items, "current_path": sub_path}
+
 
 
 @app.post("/api/files/delete")

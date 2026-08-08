@@ -54,7 +54,8 @@ def generate_payment_notices(
 
     for corp_name, data in sorted(summary.items()):
         safe_name = re.sub(r'[\\/:*?"<>|]', "_", corp_name)
-        filename = f"付款通知书_{safe_name}_{month_start.strftime('%Y%m')}.xlsx"
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"付款通知书_{safe_name}_{month_start.strftime('%Y%m')}_{timestamp}.xlsx"
         output_path = os.path.join(out_dir, filename)
 
         try:
