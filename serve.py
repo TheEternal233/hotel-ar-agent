@@ -1,6 +1,7 @@
 """酒店应收会计AI智能体 — FastAPI Web服务 + 静态前端 + 专用模块端点"""
 import json, os, logging, uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -8,6 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
+from requests.packages import target
+from starlette.responses import FileResponse
+
 from graph import build_graph
 
 # 直接导入工具函数，绕开LLM直接调用
@@ -26,7 +30,7 @@ logger = logging.getLogger(__name__)
 _graph = None
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
-
+OUTPUT_DIR = BASE_DIR / "output"
 
 def _ensure_graph():
     global _graph
@@ -43,6 +47,14 @@ def _cleanup_uploads(file_paths: list[str]):
                 fp.unlink()
         except OSError:
             pass
+
+def _is_safe_path(target: Path, base: Path) -> bool:
+    """安全检查：target 必须位于 base 目录下"""
+    try:
+        return str(target.resolve()).startswith(str(base.resolve()))
+    except (OSError, ValueError):
+        return False
+
 
 # ── Pydantic Models ──
 class ChatRequest(BaseModel):
@@ -96,6 +108,16 @@ class AgingNoticeRequest(BaseModel):
 class DailyCheckRequest(BaseModel):
     ota_paths: list[str] = []
     card_paths: list[str] = []
+
+
+class FileListResponse(BaseModel):
+    ok:bool
+    files: list=[]
+    detail: str=""
+
+class FileDeleteRequest(BaseModel):
+    path: str
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -376,3 +398,117 @@ async def aging_notice(req: AgingNoticeRequest):
     except Exception as e:
         logger.error(f"Aging+Notice error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/files")
+async def list_files(dir_type:str):
+    """列出uploads或output下的文件"""
+    if dir_type == "uploads":
+        target_dir=UPLOAD_DIR
+    elif dir_type == "output":
+        target_dir=OUTPUT_DIR
+    else:
+        raise HTTPException(status_code=400, detail="dir_type必须是uploads或output")
+
+
+    if not target_dir.exists():
+        return {"ok": True, "files": []}
+
+    files=[]
+    for f in sorted(target_dir.iterdir(),key=lambda x:x.stat().st_mtime,reverse=True):
+        if f.is_file():
+            stat=f.stat()
+            files.append({
+                "name": f.name,
+                "path": str(f),
+                "size": stat.st_size,
+                "mtime":datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "download_url": f"/api/download?path={str(f)}",
+            })
+
+    return {"ok": True, "files": files}
+
+
+@app.post("/api/files/delete")
+async def delete_file(req: FileDeleteRequest):
+    """删除uploads或output下的指定文件"""
+    try:
+        fp=Path(req.path).resolve()
+        if not (_is_safe_path(fp,UPLOAD_DIR) or _is_safe_path(fp,OUTPUT_DIR)):
+            raise HTTPException(status_code=403,detail="只能删除uploads或output目录下的文件")
+        if not fp.exists():
+            raise HTTPException(status_code=404,detail="文件不存在")
+
+        fp.unlink()
+        return {"ok": True,"message":f"已删除: {fp.name}"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete file error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/files/cleanup")
+async def cleanup_directory(req:dict):
+    """清空指定目录uploads或output"""
+    dir_type=req.get("dir_type","")
+    if dir_type == "uploads":
+        target_dir=UPLOAD_DIR
+    elif dir_type == "output":
+        target_dir=OUTPUT_DIR
+    else:
+        raise HTTPException(status_code=400,detail="dir_type必须是uploads或output")
+
+    deleted=0
+    for f in target_dir.iterdir():
+        if f.is_file():
+            try:
+                f.unlink()
+                deleted+=1
+            except OSError:
+                pass
+
+    return {"ok":True, "message":f"已清理{deleted}个文件"}
+
+
+@app.get("/api/download")
+async def download_file(path: str):
+    fp = Path(path).resolve()
+    if not (_is_safe_path(fp, UPLOAD_DIR) or _is_safe_path(fp, OUTPUT_DIR)):
+        raise HTTPException(status_code=403, detail="...")
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="...")
+    return FileResponse(path=fp, filename=fp.name, media_type="application/octet-stream")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

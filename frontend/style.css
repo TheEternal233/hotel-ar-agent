@@ -94,3 +94,17 @@ nav{flex:1;overflow-y:auto;padding:8px 0}
   .scheduler-grid,.config-grid{grid-template-columns:1fr}
   .ar-grid{grid-template-columns:repeat(2,1fr)}
 }
+
+/* File Manager */
+.filemgr-toolbar{display:flex;gap:8px;margin-bottom:12px}
+.filemgr-loading{padding:20px;text-align:center;color:var(--muted);font-size:13px}
+.filemgr-empty{padding:40px;text-align:center;color:var(--muted);font-size:13px}
+.filemgr-table{width:100%;border-collapse:collapse;font-size:13px}
+.filemgr-table th{text-align:left;padding:8px 10px;background:#f1f5f9;border-bottom:2px solid var(--border);font-weight:600;color:var(--muted);font-size:12px}
+.filemgr-table td{padding:8px 10px;border-bottom:1px solid var(--border)}
+.filemgr-table .fname{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.filemgr-table .fops{display:flex;gap:6px}
+.btn-xs{padding:4px 10px;background:#f1f5f9;color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;text-decoration:none;display:inline-block}
+.btn-xs:hover{background:#e2e8f0}
+.btn-xs.btn-danger{background:#fee2e2;color:var(--danger);border-color:#fecaca}
+.btn-xs.btn-danger:hover{background:#fecaca}

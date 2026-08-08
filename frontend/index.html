@@ -20,8 +20,10 @@
     <a href="#" data-module="card" class="nav-item" onclick="switchPanel(&apos;card&apos;);return false"><span class="icon">C</span>信用卡审核面板</a>
     <a href="#" data-module="ctrip" class="nav-item" onclick="switchPanel(&apos;ctrip&apos;);return false"><span class="icon">X</span>携程佣金</a>
     <div class="nav-section">系统管理</div>
-    <a href="#" data-module="config" class="nav-item" onclick="switchPanel(&apos;config&apos;);return false"><span class="icon">S</span>数据准备</a>
-    <a href="#" data-module="scheduler" class="nav-item" onclick="switchPanel(&apos;scheduler&apos;);return false"><span class="icon">T</span>智能调度</a>
+    <a href="#" data-module="config" class="nav-item" onclick="switchPanel('config');return false"><span class="icon">S</span>数据准备</a>
+    <a href="#" data-module="scheduler" class="nav-item" onclick="switchPanel('scheduler');return false"><span class="icon">T</span>智能调度</a>
+    <a href="#" data-module="uploads" class="nav-item" onclick="switchPanel('uploads');return false"><span class="icon">U</span>上传文件管理</a>
+    <a href="#" data-module="output" class="nav-item" onclick="switchPanel('output');return false"><span class="icon">O</span>输出文件管理</a>
   </nav>
   <div class="status-bar"><span class="status-dot" id="statusDot"></span><span id="statusText">就绪</span></div>
 </aside>
@@ -216,7 +218,36 @@
     <div class="scheduler-grid">
       <div class="sched-card"><h3>日清任务</h3><p>信用卡对账</p><button class="btn-primary" onclick="scheduleRun('daily')">执行日清</button></div>
       <div class="sched-card"><h3>月度任务</h3><p>OTA对账、账龄分析、携程佣金</p><button class="btn-primary" onclick="scheduleRun('monthly')">执行月度</button></div>
-      <div class="sched-card"><h3>人工审批</h3><p id="approvalCount">待审批: 0</p><button class="btn-sm" onclick="viewApprovals()">查看审批</button></div></div><div class="wb-result" id="schedulerResult" style="margin-top:16px"></div>
+      <div class="sched-card">...查看审批</button></div>
+    </div>
+    <div class="wb-result" id="schedulerResult" style="margin-top:16px"></div>
+  </div>
+</section>
+
+<!-- Uploads File Manager -->
+<section id="panel-uploads" class="panel">
+  <div class="panel-header"><h2>上传文件管理</h2><span class="hint">查看、下载或清理 uploads 目录下的文件</span></div>
+  <div class="workbench">
+    <div class="filemgr-toolbar">
+      <button class="btn-primary" onclick="loadFileList('uploads')">刷新</button>
+      <button class="btn-sm" onclick="cleanupDir('uploads')">清空全部</button>
+    </div>
+    <div class="filemgr-list" id="uploadsList">
+      <div class="filemgr-empty">点击「刷新」加载文件列表</div>
+    </div>
+  </div>
+</section>
+
+<!-- Output File Manager -->
+<section id="panel-output" class="panel">
+  <div class="panel-header"><h2>输出文件管理</h2><span class="hint">查看、下载或清理 output 目录下的文件</span></div>
+  <div class="workbench">
+    <div class="filemgr-toolbar">
+      <button class="btn-primary" onclick="loadFileList('output')">刷新</button>
+      <button class="btn-sm" onclick="cleanupDir('output')">清空全部</button>
+    </div>
+    <div class="filemgr-list" id="outputList">
+      <div class="filemgr-empty">点击「刷新」加载文件列表</div>
     </div>
   </div>
 </section>

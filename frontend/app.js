@@ -9,17 +9,35 @@
   // ===== Navigation =====
   function switchPanel(name) {
     console.log("[AR] -> " + name);
-    document.querySelectorAll(".nav-item").forEach(function(i) { i.classList.remove("active"); });
+    // 更新导航高亮
+    document.querySelectorAll(".nav-item").forEach(function(i) {
+      i.classList.remove("active");
+    });
     var nav = document.querySelector('.nav-item[data-module="' + name + '"]');
     if (nav) nav.classList.add("active");
-    document.querySelectorAll(".panel").forEach(function(p) { p.classList.remove("active"); });
+
+    // 隐藏所有面板
+    document.querySelectorAll(".panel").forEach(function(p) {
+      p.classList.remove("active");
+    });
+
+    // 显示目标面板
     var panel = document.getElementById("panel-" + name);
-    if (panel) panel.classList.add("active");
+    if (panel) {
+      panel.classList.add("active");
+      console.log("[AR] panel active:", "panel-" + name);
+    } else {
+      console.error("[AR] panel not found:", "panel-" + name);
+    }
   }
   window.switchPanel = switchPanel;
 
-  document.querySelectorAll(".nav-item").forEach(function(item) {
-    item.addEventListener("click", function(e) { e.preventDefault(); switchPanel(item.dataset.module); });
+    document.querySelectorAll(".nav-item").forEach(function(item) {
+    item.addEventListener("click", function(e) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      switchPanel(item.dataset.module);
+    });
   });
 
   // ===== Helpers =====
@@ -339,7 +357,80 @@
   window.viewApprovals = function() {
     addMsg("system", "[审批] 审批队列将在部署时配置");
   };
+    // ===== File Manager =====
+  window.loadFileList = async function(dirType) {
+    var elId = dirType + "List";
+    var el = document.getElementById(elId);
+    if (!el) return;
+    el.innerHTML = '<div class="filemgr-loading">加载中...</div>';
+    try {
+      var r = await fetch(API + "/files?dir_type=" + dirType);
+      var d = await r.json();
+      if (!d.ok || !d.files.length) {
+        el.innerHTML = '<div class="filemgr-empty">暂无文件</div>';
+        return;
+      }
+      var html = '<table class="filemgr-table"><thead><tr>' +
+        '<th>文件名</th><th>大小</th><th>修改时间</th><th>操作</th>' +
+        '</tr></thead><tbody>';
+      for (var i = 0; i < d.files.length; i++) {
+        var f = d.files[i];
+        var size = f.size < 1024 ? f.size + " B" :
+                   f.size < 1048576 ? (f.size / 1024).toFixed(1) + " KB" :
+                   (f.size / 1048576).toFixed(1) + " MB";
+        html += '<tr>' +
+          '<td class="fname" title="' + f.path + '">' + f.name + '</td>' +
+          '<td>' + size + '</td>' +
+          '<td>' + f.mtime + '</td>' +
+          '<td class="fops">' +
+          '<a class="btn-xs" href="' + f.download_url + '" download>下载</a>' +
+          '<button class="btn-xs btn-danger" onclick="deleteFile(\'' + f.path.replace(/\\/g, "\\\\") + '\', \'' + dirType + '\')">删除</button>' +
+          '</td></tr>';
+      }
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    } catch(e) {
+      el.innerHTML = '<div class="filemgr-empty">加载失败: ' + e.message + '</div>';
+    }
+  };
 
+  window.deleteFile = async function(filePath, dirType) {
+    if (!confirm("确定删除该文件？")) return;
+    try {
+      var r = await fetch(API + "/files/delete", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({path: filePath})
+      });
+      var d = await r.json();
+      if (d.ok) {
+        loadFileList(dirType);
+      } else {
+        alert("删除失败: " + (d.detail || "未知"));
+      }
+    } catch(e) {
+      alert("删除失败: " + e.message);
+    }
+  };
+
+  window.cleanupDir = async function(dirType) {
+    if (!confirm("确定清空 " + dirType + " 目录下的所有文件？此操作不可恢复！")) return;
+    try {
+      var r = await fetch(API + "/files/cleanup", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({dir_type: dirType})
+      });
+      var d = await r.json();
+      if (d.ok) {
+        loadFileList(dirType);
+      } else {
+        alert("清理失败: " + (d.detail || "未知"));
+      }
+    } catch(e) {
+      alert("清理失败: " + e.message);
+    }
+  };
   // ===== Health =====
   async function checkHealth() {
     try { var r = await fetch(API + "/health"), d = await r.json();
