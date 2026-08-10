@@ -139,7 +139,7 @@ def _generate_recon_report(recon_results):
     for r in recon_results:
         flag="对平" if r["balanced"] else "差异"
         detail=(
-            f"匹配{r.get('matched_count',0)}笔"
+            f"匹配{r.get('matched_count',0)}笔， "
             f"PMS短款{r.get('unmatched_pms_count',0)}/POS长款{r.get('unmatched_bank_count',0)}"
         )
 

@@ -22,8 +22,11 @@ def _read_pms_report(path):
     headers, rows = read_sheet(path)
     groups = {}
     for r in rows:
-        code = str(r.get("付款代码", "")).strip()
-        # 跳过汇总行（付款代码不是纯数字）
+        raw = r.get("付款代码", "")
+        if isinstance(raw, (int, float)):
+            code = str(int(raw))
+        else:
+            code = str(raw).strip() if raw else ""
         if not code.isdigit():
             continue
         desc = str(r.get("付款描述", "")).strip()
@@ -66,10 +69,16 @@ def _read_pos_statement(path):
         method = normalize_payment(pay_type, source="pos")
         if method is None:
             continue  # 不在 4 种之内的不统计
+        try:
+            amount = float(r.get("客户实付金额", 0) or 0)
+            fee = float(r.get("手续费金额", 0) or 0)
+            net = float(r.get("入账金额", 0) or 0)
+        except (ValueError, TypeError):
+            continue
         groups.setdefault(method, []).append({
-            "amount": float(r.get("客户实付金额", 0) or 0),
-            "fee": float(r.get("手续费金额", 0) or 0),
-            "net": float(r.get("入账金额", 0) or 0),
+            "amount": amount,
+            "fee": fee,
+            "net": net,
             "tx_time": r.get("交易时间"),
             "raw": r,
         })
@@ -94,7 +103,8 @@ def _read_yfd_pms(path,channel_keyword):
         tx_type = str(r.get("类型", "")).strip()
         if tx_type !="借方":
             continue
-        desc=str(r.get("姓名/描述", "")or r.get("姓名 / 描述","")) .strip()
+        desc_val = r.get("姓名/描述") or r.get("姓名 / 描述")
+        desc = str(desc_val).strip() if desc_val else ""
         desc_nospace=desc.replace(" ","")
         keyword_nospace=channel_keyword.replace(" ","")
         if keyword_nospace not in desc_nospace:

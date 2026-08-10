@@ -171,8 +171,13 @@ def credit_card_recon(bank_statement_path: str = "", pms_card_path: str = "") ->
         try:
             if p:
                 fp = Path(p).resolve()
-                if str(fp).startswith(str(base)) and fp.exists():
-                    os.remove(p)
+                try:
+                    fp.relative_to(base)
+                    if fp.exists():
+
+                        os.remove(p)
+                except ValueError:
+                    pass
         except OSError:
             pass
     return result

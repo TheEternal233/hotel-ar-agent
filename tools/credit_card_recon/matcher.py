@@ -20,7 +20,7 @@ def _match_by_amount(pms_txs, bank_txs):
     def group_by_amount(txs):
         groups = defaultdict(list)
         for t in txs:
-            key = round(float(t.get("amount", 0)), 2)
+            key = int(round(float(t.get("amount", 0)) * 100))
             groups[key].append(t)
         return groups
 
