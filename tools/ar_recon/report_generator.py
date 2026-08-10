@@ -37,16 +37,20 @@ def _init_workbook(ar_mode=False, ota_path=None, pms_path=None):
     wb.remove(wb.active)
     if ota_path == pms_path:
         src_wb = openpyxl.load_workbook(ota_path, data_only=False)
-        for ws in src_wb.worksheets:
-            new_title = "OTA" if ws.title == XIANGMINIAO_OTA_SHEET else None
-            _copy_sheet_to_wb(ws, wb, title=new_title)
-        src_wb.close()
+        try:
+            for ws in src_wb.worksheets:
+                new_title = "OTA" if ws.title == XIANGMINIAO_OTA_SHEET else None
+                _copy_sheet_to_wb(ws, wb, title=new_title)
+        finally:
+            src_wb.close()
     else:
         for path, prefix in ((pms_path, "PMS"), (ota_path, "OTA")):
             src_wb = openpyxl.load_workbook(path, data_only=False)
-            for idx, ws in enumerate(src_wb.worksheets):
-                _copy_sheet_to_wb(ws, wb, title=prefix if idx == 0 else None)
-            src_wb.close()
+            try:
+                for idx, ws in enumerate(src_wb.worksheets):
+                    _copy_sheet_to_wb(ws, wb, title=prefix if idx == 0 else None)
+            finally:
+                src_wb.close()
     return wb
 
 

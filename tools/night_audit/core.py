@@ -26,10 +26,7 @@ def _read_first_sheet_rows(wb_path: str) -> List[List]:
     finally:
         wb.close()
 
-
-
 #  带样式读取
-
 def _cell_info(cell):
     """提取单元格的值和关键样式（填充色、字体颜色、粗体）"""
     info = {"value": cell.value}

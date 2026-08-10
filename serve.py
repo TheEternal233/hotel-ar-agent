@@ -52,7 +52,8 @@ def _cleanup_uploads(file_paths: list[str]):
 def _is_safe_path(target: Path, base: Path) -> bool:
     """安全检查：target 必须位于 base 目录下"""
     try:
-        return str(target.resolve()).startswith(str(base.resolve()))
+        target.resolve().relative_to(base.resolve())
+        return True
     except (OSError, ValueError):
         return False
 
@@ -209,7 +210,9 @@ async def chat_stream(req: ChatRequest):
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
     UPLOAD_DIR.mkdir(exist_ok=True)
-    file_path = UPLOAD_DIR / file.filename
+    file_path = (UPLOAD_DIR / file.filename).resolve()
+    if not _is_safe_path(file_path,UPLOAD_DIR):
+        raise HTTPException(status_code=400,detail="非法文件名")
     with open(file_path, "wb") as f:
         f.write(await file.read())
     return {"filename": file.filename, "path": str(file_path), "size": file_path.stat().st_size}
@@ -479,7 +482,6 @@ async def cleanup_directory(req:dict):
 
     deleted=0
     for f in target_dir.iterdir():
-        if f.is_file():
             try:
                 if f.is_dir():
                     shutil.rmtree(f)

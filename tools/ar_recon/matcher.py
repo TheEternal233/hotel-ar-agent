@@ -11,13 +11,12 @@ def _build_pms_order_index(pms_list):
     for i, p in enumerate(pms_list):
         ext = _norm_orderno(p.get("ext_order", ""))
         od = _norm_orderno(p.get("order", ""))
-        print(f"DEBUG build_index: i={i}, ext={ext!r}, od={od!r}")
+
         if ext:
             by_ext.setdefault(ext, []).append(i)
         if od:
             by_order.setdefault(od, []).append(i)
-    print(f"DEBUG by_ext: {by_ext}")
-    print(f"DEBUG by_order: {by_order}")
+
     return by_ext, by_order
 
 
@@ -33,15 +32,14 @@ def _match_by_order_id(oid, amt, pms_list, by_ext, by_order, used, amount_tol=AM
         return -1
     candidates = by_ext.get(oid, [])
     # 第一轮：金额一致
-    print(f"DEBUG: oid={oid}, amt={amt}, candidates={candidates}")
+
     for ci in candidates:
         if ci in used:
-            print(f"DEBUG: ci={ci} already used")
+
             continue
-        pms_amt = _norm_amount(pms_list[ci].get("amount", 0))
-        print(f"DEBUG: ci={ci}, pms_amt={pms_amt}, diff={abs(amt - pms_amt)}")
+
         if abs(amt - _norm_amount(pms_list[ci].get("amount", 0))) < amount_tol:
-            print(f"DEBUG: matched ci={ci}")
+
             return ci
     # 第二轮：仅订单号
     for ci in candidates:
@@ -197,8 +195,21 @@ def _match_ota_rezen_fnb(ota_records, rezen_records, channel_name):
     ota_counts, ota_vouchers, ota_total = _build_amount_counter(ota_records, price_col, "voucher_no")
     pms_counts, pms_bills, pms_total = _build_amount_counter(rezen_records, "amount", "bill_no")
 
+    # 收集所有金额，按容差确定统一基准
+    all_amounts = sorted(set(ota_counts.keys()) | set(pms_counts.keys()))
+    price_groups = []  # [(基准价格, [相近价格列表]), ...]
+
+    for amt in all_amounts:
+        merged = False
+        for base, members in price_groups:
+            if abs(amt - base) < AMOUNT_TOLERANCE:
+                members.append(amt)
+                merged = True
+                break
+        if not merged:
+            price_groups.append((amt, [amt]))
+
     results = []
-    all_prices = set(ota_counts.keys()) | set(pms_counts.keys())
     stats = {
         "total_ota": len(ota_records),
         "total_pms": len(rezen_records),
@@ -207,13 +218,20 @@ def _match_ota_rezen_fnb(ota_records, rezen_records, channel_name):
         "pms_amount_total": round(pms_total, 2),
     }
 
-    for price in sorted(all_prices):
-        ota_cnt = ota_counts.get(price, 0)
-        pms_cnt = pms_counts.get(price, 0)
-        diff_cnt = ota_cnt - pms_cnt
+    for base, members in price_groups:
+        ota_cnt = sum(ota_counts.get(m, 0) for m in members)
+        pms_cnt = sum(pms_counts.get(m, 0) for m in members)
 
-        ota_amt_total = round(price * ota_cnt, 2)
-        pms_amt_total = round(price * pms_cnt, 2)
+        # 收集券号/账单号
+        ota_vouchers_list = []
+        pms_bills_list = []
+        for m in members:
+            ota_vouchers_list.extend(ota_vouchers.get(m, []))
+            pms_bills_list.extend(pms_bills.get(m, []))
+
+        diff_cnt = ota_cnt - pms_cnt
+        ota_amt_total = round(base * ota_cnt, 2)
+        pms_amt_total = round(base * pms_cnt, 2)
         diff_amt = round(ota_amt_total - pms_amt_total, 2)
 
         if ota_cnt == pms_cnt and ota_cnt > 0:
@@ -231,15 +249,15 @@ def _match_ota_rezen_fnb(ota_records, rezen_records, channel_name):
 
         results.append({
             "status": status,
-            "price": price,
+            "price": base,
             "ota_count": ota_cnt,
             "pms_count": pms_cnt,
             "diff_count": diff_cnt,
             "ota_amount_total": ota_amt_total,
             "pms_amount_total": pms_amt_total,
             "diff_amount": diff_amt,
-            "ota_vouchers": ", ".join(v for v in ota_vouchers.get(price, []) if v),
-            "pms_bills": ", ".join(b for b in pms_bills.get(price, []) if b),
+            "ota_vouchers": ", ".join(v for v in ota_vouchers_list if v),
+            "pms_bills": ", ".join(b for b in pms_bills_list if b),
         })
 
     return results, stats

@@ -125,6 +125,8 @@ class PmsParser:
     def _fmt_num(val,default=0.0):
         if val is None:
             return default
+        if isinstance(val, bool):
+            return default
         if isinstance(val, (int, float)):
             return float(val)
         try:

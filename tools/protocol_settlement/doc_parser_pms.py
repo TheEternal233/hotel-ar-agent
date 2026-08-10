@@ -47,8 +47,12 @@ def _open_workbook(path:str,sheet_name:str=None):
     if not os.path.exists(path):
         raise FileNotFoundError(f"文件不存在:{path}")
     wb=openpyxl.load_workbook(path,data_only=True)
-    ws=wb[sheet_name] if sheet_name else wb.active
-    return wb,ws
+    try:
+        ws=wb[sheet_name] if sheet_name else wb.active
+        return wb,ws
+    except Exception:
+        wb.close()
+        raise
 
 def _get_headers(ws,header_row:int=1)->list[str]:
     """读取指定行的表头"""
@@ -120,92 +124,99 @@ def read_pms_receivable(path: str, header_row: int = 1, sheet_name: str = None) 
         corp_extracted（从转账注释提取的协议单位）
     """
     wb, ws = _open_workbook(path, sheet_name)
-    headers = _get_headers(ws, header_row)
-    headers_lower = [h.lower() for h in headers]
+    try:
+        headers = _get_headers(ws, header_row)
+        headers_lower = [h.lower() for h in headers]
 
-    # 建立字段到列索引的映射
-    field_to_col = {}
-    for std_name, keywords in PMS_RECEIVABLE_MAPPING.items():
-        for kw in keywords:
-            kw_lower = kw.lower()
-            for idx, hl in enumerate(headers_lower):
-                if kw_lower in hl:
-                    field_to_col[std_name] = idx
+        # 建立字段到列索引的映射
+        field_to_col = {}
+        for std_name, keywords in PMS_RECEIVABLE_MAPPING.items():
+            for kw in keywords:
+                kw_lower = kw.lower()
+                for idx, hl in enumerate(headers_lower):
+                    if kw_lower in hl:
+                        field_to_col[std_name] = idx
+                        break
+                if std_name in field_to_col:
                     break
-            if std_name in field_to_col:
-                break
 
-    records = []
-    start_row = header_row + 1
-    for row in ws.iter_rows(min_row=start_row, values_only=True):
-        # 跳过全空行
-        if all(v is None for v in row):
-            continue
+        records = []
+        start_row = header_row + 1
+        for row in ws.iter_rows(min_row=start_row, values_only=True):
+            # 跳过全空行
+            if all(v is None for v in row):
+                continue
 
-        rec = {}
-        for std_name, col_idx in field_to_col.items():
-            val = row[col_idx] if col_idx < len(row) else None
-            rec[std_name] = val
+            rec = {}
+            for std_name, col_idx in field_to_col.items():
+                val = row[col_idx] if col_idx < len(row) else None
+                rec[std_name] = val
 
-        # 类型转换
-        rec["date"] = _parse_date(rec.get("date"))
-        rec["debit"] = _parse_amount(rec.get("debit"))
-        rec["credit"] = _parse_amount(rec.get("credit"))
-        rec["written_off"] = _parse_amount(rec.get("written_off"))
-        rec["balance"] = _parse_amount(rec.get("balance"))
-        rec["amount"] = _parse_amount(rec.get("amount"))
-        rec["dispute"] = _parse_amount(rec.get("dispute"))
+            # 类型转换
+            rec["date"] = _parse_date(rec.get("date"))
+            rec["debit"] = _parse_amount(rec.get("debit"))
+            rec["credit"] = _parse_amount(rec.get("credit"))
+            rec["written_off"] = _parse_amount(rec.get("written_off"))
+            rec["balance"] = _parse_amount(rec.get("balance"))
+            rec["amount"] = _parse_amount(rec.get("amount"))
+            rec["dispute"] = _parse_amount(rec.get("dispute"))
 
-        # 字符串清理
-        for k in ["bill_no", "type", "name_desc", "room", "finance_note",
-                  "note", "transfer_note", "checkout_bill", "order_no",
-                  "ext_order", "central_order", "corp", "order_remark", "operator"]:
-            if rec.get(k) is not None:
-                rec[k] = str(rec[k]).strip()
-            else:
-                rec[k] = ""
+            # 字符串清理
+            for k in ["bill_no", "type", "name_desc", "room", "finance_note",
+                      "note", "transfer_note", "checkout_bill", "order_no",
+                      "ext_order", "central_order", "corp", "order_remark", "operator"]:
+                if rec.get(k) is not None:
+                    rec[k] = str(rec[k]).strip()
+                else:
+                    rec[k] = ""
 
-        # 从转账注释提取协议单位
-        rec["corp_extracted"] = extract_corp_from_note(rec.get("transfer_note", ""))
+            # 从转账注释提取协议单位
+            rec["corp_extracted"] = extract_corp_from_note(rec.get("transfer_note", ""))
 
-        # 确定有效协议单位（优先使用corp列，其次从转账注释提取）
-        effective_corp = rec["corp"] if rec["corp"] else rec["corp_extracted"]
-        rec["effective_corp"] = normalize_corp_name(effective_corp) if effective_corp else ""
+            # 确定有效协议单位（优先使用corp列，其次从转账注释提取）
+            effective_corp = rec["corp"] if rec["corp"] else rec["corp_extracted"]
+            rec["effective_corp"] = normalize_corp_name(effective_corp) if effective_corp else ""
 
-        records.append(rec)
+            records.append(rec)
 
-    wb.close()
-    return records
+        return records
+    finally:
+        wb.close()
 
 
 
 def get_pms_info(path:str, sheet_name: str = None) -> Dict[str, Any]:
     """获取PMS应收财务文件的基本信息"""
     wb,ws=_open_workbook(path, sheet_name)
-    headers = _get_headers(ws,1)
-    rows=sum(1 for _ in ws.iter_rows(min_row=2))
-    wb.close()
-    return {
-        "path": path,
-        "filename": os.path.basename(path),
-        "sheet": ws.title,
-        "cols":len(headers),
-        "rows":rows,
-        "headers": headers,
-    }
+    try:
+        headers = _get_headers(ws,1)
+        rows=sum(1 for _ in ws.iter_rows(min_row=2))
+        return {
+            "path": path,
+            "filename": os.path.basename(path),
+            "sheet": ws.title,
+            "cols":len(headers),
+            "rows":rows,
+            "headers": headers,
+        }
+    finally:
+        wb.close()
 
 
 def validate_pms_receivable(path:str, sheet_name: str = None) -> tuple:
     """验证PMS应收帐务文件是否包含必要的列"""
     required=["账单号", "类型", "日期", "借方", "贷方", "余额", "协议单位"]
+    wb = None
     try:
         wb,ws=_open_workbook(path, sheet_name)
         headers = _get_headers(ws,1)
         headers_str=[str(h) for h in headers]
         missing=[c for c in required if not any(c in h for h in headers_str)]
-        wb.close()
         if missing:
             return False, f"缺少必要列: {missing} (现有: {headers_str})"
         return True,f"验证通过: {len(headers_str)} 列"
     except Exception as e:
         return False,f"验证失败:{e}"
+    finally:
+        if wb is not None:
+            wb.close()

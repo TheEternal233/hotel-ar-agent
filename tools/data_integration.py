@@ -49,10 +49,13 @@ def data_integration(action: str, source_path: str = "") -> str:
         ext = os.path.splitext(source_path)[1].lower()
         if ext in (".xlsx",".xls"):
             import openpyxl
-            wb = openpyxl.load_workbook(source_path); ws = wb.active
-            headers = [c.value for c in next(ws.iter_rows(min_row=1,max_row=1))]
-            rows = sum(1 for _ in ws.iter_rows(min_row=2))
-            wb.close()
-            return f"Excel OK. Sheet={ws.title} cols={len(headers)} rows={rows}\nHeaders: {headers}"
+            wb = openpyxl.load_workbook(source_path)
+            try:
+                ws = wb.active
+                headers = [c.value for c in next(ws.iter_rows(min_row=1,max_row=1))]
+                rows = sum(1 for _ in ws.iter_rows(min_row=2))
+                return f"Excel OK. Sheet={ws.title} cols={len(headers)} rows={rows}\nHeaders: {headers}"
+            finally:
+                wb.close()
         return f"unsupported: {ext}"
     return f"unknown: {action}"

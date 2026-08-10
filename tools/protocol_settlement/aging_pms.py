@@ -4,6 +4,7 @@ M03: PMS应收账龄分析与坏账计提工具（协议客户对账）
 import os
 import copy
 from datetime import datetime
+from pathlib import Path
 from typing import  Dict, Any
 
 try:
@@ -146,103 +147,105 @@ def _write_aging_report(result: Dict[str, Any], template_path: str, output_path:
         raise FileNotFoundError(f"模板文件不存在: {template_path}")
 
     wb = load_workbook(template_path)
-    ws = wb.active
+    try:
+        ws = wb.active
 
-    # 定位Total行
-    total_row = None
-    for row_idx in range(2, ws.max_row + 1):
-        cell_b = ws.cell(row=row_idx, column=2)
-        if cell_b.value and str(cell_b.value).strip().lower() in ["total", "合计"]:
-            total_row = row_idx
-            break
+        # 定位Total行
+        total_row = None
+        for row_idx in range(2, ws.max_row + 1):
+            cell_b = ws.cell(row=row_idx, column=2)
+            if cell_b.value and str(cell_b.value).strip().lower() in ["total", "合计"]:
+                total_row = row_idx
+                break
 
-    if total_row is None:
-        total_row = ws.max_row + 1
+        if total_row is None:
+            total_row = ws.max_row + 1
 
-    # 清空旧数据
-    for row_idx in range(2, total_row):
-        for col_idx in range(1, 11):
-            ws.cell(row=row_idx, column=col_idx).value = None
+        # 清空旧数据
+        for row_idx in range(2, total_row):
+            for col_idx in range(1, 11):
+                ws.cell(row=row_idx, column=col_idx).value = None
 
-    # 写入数据
-    customers = result["customers"]
-    sorted_customers = sorted(customers.items(), key=lambda x: -x[1]["total"])
-    data_start_row = 2
+        # 写入数据
+        customers = result["customers"]
+        sorted_customers = sorted(customers.items(), key=lambda x: -x[1]["total"])
+        data_start_row = 2
 
-    for idx, (corp_name, data) in enumerate(sorted_customers):
-        row_idx = data_start_row + idx
+        for idx, (corp_name, data) in enumerate(sorted_customers):
+            row_idx = data_start_row + idx
 
-        ws.cell(row=row_idx, column=1, value=data["account_no"])
-        ws.cell(row=row_idx, column=2, value=corp_name)
+            ws.cell(row=row_idx, column=1, value=data["account_no"])
+            ws.cell(row=row_idx, column=2, value=corp_name)
 
-        for col_offset, (_, bname, bkey) in enumerate(AGING_BRACKETS, start=3):
-            val = data["amounts"].get(bkey, 0)
-            cell = ws.cell(row=row_idx, column=col_offset, value=round(val, 2) if val else 0)
+            for col_offset, (_, bname, bkey) in enumerate(AGING_BRACKETS, start=3):
+                val = data["amounts"].get(bkey, 0)
+                cell = ws.cell(row=row_idx, column=col_offset, value=round(val, 2) if val else 0)
+                cell.border = THIN_BORDER
+                cell.number_format = '#,##0.00'
+                if bkey in ["91-120", "121-150", "151-180"] and val > 0:
+                    cell.fill = YELLOW_FILL
+                elif bkey == "180+" and val > 0:
+                    cell.fill = RED_FILL
+
+            total_cell = ws.cell(row=row_idx, column=10, value=round(data["total"], 2))
+            total_cell.border = THIN_BORDER
+            total_cell.number_format = '#,##0.00'
+            total_cell.font = Font(bold=True)
+
+            for c in [1, 2]:
+                ws.cell(row=row_idx, column=c).border = THIN_BORDER
+
+        # 更新Total行
+        new_total_row = data_start_row + len(sorted_customers)
+
+        if total_row != new_total_row and total_row is not None:
+            for col_idx in range(1, 11):
+                old_cell = ws.cell(row=total_row, column=col_idx)
+                new_cell = ws.cell(row=new_total_row, column=col_idx)
+                new_cell.value = old_cell.value
+                if old_cell.font:
+                    new_cell.font = Font(
+                        name=old_cell.font.name,
+                        size=old_cell.font.size,
+                        bold=old_cell.font.bold,
+                        italic=old_cell.font.italic,
+                        color=old_cell.font.color,
+                    )
+                if old_cell.fill and old_cell.fill.fill_type:
+                    new_cell.fill = PatternFill(
+                        start_color=old_cell.fill.start_color.rgb if old_cell.fill.start_color else None,
+                        end_color=old_cell.fill.end_color.rgb if old_cell.fill.end_color else None,
+                        fill_type=old_cell.fill.fill_type,
+                    )
+                if old_cell.border:
+                    new_cell.border = copy.copy(old_cell.border)
+                old_cell.value = None
+
+        total_row = new_total_row
+        ws.cell(row=total_row, column=1, value="").border = THIN_BORDER
+        ws.cell(row=total_row, column=2, value="Total").font = Font(bold=True)
+        ws.cell(row=total_row, column=2).border = THIN_BORDER
+        ws.cell(row=total_row, column=2).fill = TOTAL_FILL
+
+        for col_idx in range(3, 11):
+            cell = ws.cell(row=total_row, column=col_idx)
+            col_letter = get_column_letter(col_idx)
+            cell.value = f"=SUM({col_letter}{data_start_row}:{col_letter}{total_row - 1})"
+            cell.font = Font(bold=True)
+            cell.fill = TOTAL_FILL
             cell.border = THIN_BORDER
             cell.number_format = '#,##0.00'
-            if bkey in ["91-120", "121-150", "151-180"] and val > 0:
-                cell.fill = YELLOW_FILL
-            elif bkey == "180+" and val > 0:
-                cell.fill = RED_FILL
 
-        total_cell = ws.cell(row=row_idx, column=10, value=round(data["total"], 2))
-        total_cell.border = THIN_BORDER
-        total_cell.number_format = '#,##0.00'
-        total_cell.font = Font(bold=True)
+        # 调整列宽
+        ws.column_dimensions['A'].width = 18
+        ws.column_dimensions['B'].width = 35
+        for c in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']:
+            ws.column_dimensions[c].width = 14
 
-        for c in [1, 2]:
-            ws.cell(row=row_idx, column=c).border = THIN_BORDER
-
-    # 更新Total行
-    new_total_row = data_start_row + len(sorted_customers)
-
-    if total_row != new_total_row and total_row is not None:
-        for col_idx in range(1, 11):
-            old_cell = ws.cell(row=total_row, column=col_idx)
-            new_cell = ws.cell(row=new_total_row, column=col_idx)
-            new_cell.value = old_cell.value
-            if old_cell.font:
-                new_cell.font = Font(
-                    name=old_cell.font.name,
-                    size=old_cell.font.size,
-                    bold=old_cell.font.bold,
-                    italic=old_cell.font.italic,
-                    color=old_cell.font.color,
-                )
-            if old_cell.fill and old_cell.fill.fill_type:
-                new_cell.fill = PatternFill(
-                    start_color=old_cell.fill.start_color.rgb if old_cell.fill.start_color else None,
-                    end_color=old_cell.fill.end_color.rgb if old_cell.fill.end_color else None,
-                    fill_type=old_cell.fill.fill_type,
-                )
-            if old_cell.border:
-                new_cell.border = copy.copy(old_cell.border)
-            old_cell.value = None
-
-    total_row = new_total_row
-    ws.cell(row=total_row, column=1, value="").border = THIN_BORDER
-    ws.cell(row=total_row, column=2, value="Total").font = Font(bold=True)
-    ws.cell(row=total_row, column=2).border = THIN_BORDER
-    ws.cell(row=total_row, column=2).fill = TOTAL_FILL
-
-    for col_idx in range(3, 11):
-        cell = ws.cell(row=total_row, column=col_idx)
-        col_letter = get_column_letter(col_idx)
-        cell.value = f"=SUM({col_letter}{data_start_row}:{col_letter}{total_row - 1})"
-        cell.font = Font(bold=True)
-        cell.fill = TOTAL_FILL
-        cell.border = THIN_BORDER
-        cell.number_format = '#,##0.00'
-
-    # 调整列宽
-    ws.column_dimensions['A'].width = 18
-    ws.column_dimensions['B'].width = 35
-    for c in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']:
-        ws.column_dimensions[c].width = 14
-
-    wb.save(output_path)
-    wb.close()
-    return output_path
+        wb.save(output_path)
+        return output_path
+    finally:
+        wb.close()
 
 
 # ========== 前端可调用的Tool接口 ==========
@@ -298,7 +301,9 @@ if tool is not None:
         if not keep_source:
             # 处理完之后删除上传的源文件
             try:
-                if os.path.exists(receivable_path):
+                p=Path(receivable_path).resolve()
+                base=Path(PROJECT_ROOT).resolve()
+                if str(p).startswith(str(base)) and p.exists():
                     os.remove(receivable_path)
             except Exception:
                 pass

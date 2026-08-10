@@ -10,6 +10,7 @@
 """
 import gc
 import os
+from pathlib import Path
 
 try:
     from langchain.tools import tool
@@ -165,10 +166,13 @@ def credit_card_recon(bank_statement_path: str = "", pms_card_path: str = "") ->
     # 强制垃圾回收，释放Excel文件句柄
     gc.collect()
     # 清理上传文件：直接删除，不做路径前缀检查
+    base = Path(BASE_DIR).resolve()
     for p in (bank_statement_path, pms_card_path):
         try:
-            if p and os.path.exists(p):
-                os.remove(p)
+            if p:
+                fp = Path(p).resolve()
+                if str(fp).startswith(str(base)) and fp.exists():
+                    os.remove(p)
         except OSError:
             pass
     return result
