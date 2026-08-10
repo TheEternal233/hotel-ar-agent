@@ -11,10 +11,13 @@ def _build_pms_order_index(pms_list):
     for i, p in enumerate(pms_list):
         ext = _norm_orderno(p.get("ext_order", ""))
         od = _norm_orderno(p.get("order", ""))
+        print(f"DEBUG build_index: i={i}, ext={ext!r}, od={od!r}")
         if ext:
             by_ext.setdefault(ext, []).append(i)
         if od:
             by_order.setdefault(od, []).append(i)
+    print(f"DEBUG by_ext: {by_ext}")
+    print(f"DEBUG by_order: {by_order}")
     return by_ext, by_order
 
 
@@ -28,12 +31,17 @@ def _match_by_order_id(oid, amt, pms_list, by_ext, by_order, used, amount_tol=AM
     """
     if not oid:
         return -1
-    candidates = by_ext.get(oid, []) + by_order.get(oid, [])
+    candidates = by_ext.get(oid, [])
     # 第一轮：金额一致
+    print(f"DEBUG: oid={oid}, amt={amt}, candidates={candidates}")
     for ci in candidates:
         if ci in used:
+            print(f"DEBUG: ci={ci} already used")
             continue
+        pms_amt = _norm_amount(pms_list[ci].get("amount", 0))
+        print(f"DEBUG: ci={ci}, pms_amt={pms_amt}, diff={abs(amt - pms_amt)}")
         if abs(amt - _norm_amount(pms_list[ci].get("amount", 0))) < amount_tol:
+            print(f"DEBUG: matched ci={ci}")
             return ci
     # 第二轮：仅订单号
     for ci in candidates:

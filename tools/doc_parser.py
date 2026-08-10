@@ -118,7 +118,14 @@ def read_rezen(path, header_row=1, sheet_name=None):
                 if kwl in h:
                     return i
         return -1
-
+    def _find_idx_exact(*keywords):
+        """精确匹配：表头必须完全等于关键词，避免子串误匹配"""
+        for kw in keywords:
+            kwl = kw.lower()
+            for i, h in enumerate(headers_lower):
+                if h == kwl:
+                    return i
+        return -1
     idx_bill = _find_idx("账单号")
     idx_type = _find_idx("类型")
     idx_date = _find_idx("日期")
@@ -132,7 +139,7 @@ def read_rezen(path, header_row=1, sheet_name=None):
     idx_note = _find_idx("财务备注", "备注")
     idx_bill_no = _find_idx("结账单号")
     idx_ext_order = _find_idx("外部订单号")
-    idx_order = _find_idx("订单号")
+    idx_order = _find_idx_exact("订单号")
     idx_corp = _find_idx("协议单位")
     idx_name = _find_idx("姓名", "描述")
     idx_remark = _find_idx("转账注释", "订单备注")
@@ -418,3 +425,4 @@ def detect_ota_channel(path):
 
     wb.close()
     return None
+
