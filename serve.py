@@ -22,7 +22,7 @@ from tools.credit_card_recon import credit_card_recon
 from tools.data_integration import data_integration
 
 from tools.invoice import invoice_gen
-from tools.night_audit import daily_check_handler
+from tools.night_audit import daily_check_handler, auto_daily_check_handler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -260,6 +260,19 @@ async def daily_check(req: DailyCheckRequest):
         raise
     except Exception as e:
         logger.error(f"Daily check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/daily/check/auto")
+async def daily_check_auto():
+    """每日核对工作台（自动模式）：自动读取 output/OTA对账/ 和 output/信用卡审核/ 下的文件"""
+    try:
+        result = auto_daily_check_handler()
+        return {"ok": True, "result": str(result)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Daily check auto error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

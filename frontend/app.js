@@ -256,6 +256,16 @@
     btnEnable(btn, "开始汇总");
   };
 
+  window.runDailyCheckAuto = async function() {
+    var btn = document.getElementById("dailyCheckAutoBtn");
+    btnDisable(btn, "汇总中..."); showLoading("dailyResult");
+    try {
+      var resp = await apiPost("/daily/check/auto", {});
+      setResult("dailyResult", resp.ok ? resp.result : ("错误：" + (resp.detail || "未知")));
+    } catch(e) { setResult("dailyResult", "错误：" + e.message); }
+    btnEnable(btn, "自动汇总（output目录）");
+  };
+
   // ===== Daily AR (专用端点 + 文件上传) =====
   window.runDailyAr = async function(type) {
     var card = document.querySelector('#panel-ar .ar-card[onclick*="' + type + '"]');

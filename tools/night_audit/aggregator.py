@@ -20,6 +20,8 @@ from .core import (
 
 OTA_SHEET_NAME = "对账汇总"
 GAP_ROWS = 5
+DEFAULT_OTA_OUTPUT_DIR = ("output", "OTA对账")
+DEFAULT_CARD_OUTPUT_DIR = ("output", "信用卡审核")
 
 
 def _collect_ota_data(ota_paths: List[str]) -> List[tuple]:
@@ -125,3 +127,29 @@ def aggregate_daily_check(
     wb.save(output_path)
     wb.close()
     return output_path
+
+
+def auto_aggregate_daily_check() -> str:
+    """自动扫描 output/OTA对账/ 和 output/信用卡审核/ 目录，汇总生成夜审报告"""
+    base = Path(__file__).resolve().parent.parent.parent
+    ota_dir = base.joinpath(*DEFAULT_OTA_OUTPUT_DIR)
+    card_dir = base.joinpath(*DEFAULT_CARD_OUTPUT_DIR)
+
+    ota_paths = []
+    if ota_dir.exists():
+        ota_paths = sorted(
+            [str(f) for f in ota_dir.iterdir() if f.is_file() and f.suffix in (".xlsx", ".xls")],
+            key=lambda p: os.path.getmtime(p), reverse=True
+        )
+
+    card_paths = []
+    if card_dir.exists():
+        card_paths = sorted(
+            [str(f) for f in card_dir.iterdir() if f.is_file() and f.suffix in (".xlsx", ".xls")],
+            key=lambda p: os.path.getmtime(p), reverse=True
+        )
+
+    if not ota_paths and not card_paths:
+        raise ValueError("未找到对账结果文件，请先执行 OTA对账 和 信用卡对账")
+
+    return aggregate_daily_check(ota_paths, card_paths)

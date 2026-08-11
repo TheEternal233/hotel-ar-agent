@@ -1,4 +1,7 @@
-from tools.ar_recon.constants import AMOUNT_TOLERANCE, MAX_AMOUNT_DIFF, DIFF_TOLERANCE
+from tools.ar_recon.constants import (
+    AMOUNT_TOLERANCE, MAX_AMOUNT_DIFF, DIFF_TOLERANCE,
+    STATUS_MATCH, STATUS_DIFF, STATUS_OTA_ONLY, STATUS_PMS_ONLY,
+)
 from tools.doc_parser import OTA_CHANNEL_MAPPINGS
 from utils.common_func import _norm_amount, _norm_orderno
 
@@ -112,7 +115,7 @@ def _append_unmatched_pms(results, pms_list, used):
         if i not in used:   # 不在used->未被任何OTA匹配到
             pms_amt = _norm_amount(p.get("amount", 0))
             results.append({
-                "status": "pms_only",
+                "status": STATUS_PMS_ONLY,
                 "ota": None,
                 "pms": p,
                 "ota_amount": 0,
@@ -128,10 +131,10 @@ def _calc_stats(results, total_ota=None, total_pms=None):
     return {
         "total_ota": total_ota if total_ota is not None else sum(1 for r in results if r["ota"] is not None),
         "total_pms": total_pms if total_pms is not None else sum(1 for r in results if r["pms"] is not None),
-        "match": sum(1 for r in results if r["status"] == "match"),
-        "diff": sum(1 for r in results if r["status"] == "diff"),
-        "ota_only": sum(1 for r in results if r["status"] == "ota_only"),
-        "pms_only": sum(1 for r in results if r["status"] == "pms_only"),
+        "match": sum(1 for r in results if r["status"] == STATUS_MATCH),
+        "diff": sum(1 for r in results if r["status"] == STATUS_DIFF),
+        "ota_only": sum(1 for r in results if r["status"] == STATUS_OTA_ONLY),
+        "pms_only": sum(1 for r in results if r["status"] == STATUS_PMS_ONLY),
     }
 
 
@@ -174,14 +177,14 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
             rezen_matched.add(ri)
             ramt = _norm_amount(rezen_records[ri].get("amount", 0))
             diff = round(oamt - ramt, 2)
-            status = "match" if abs(diff) < DIFF_TOLERANCE else "diff"
+            status = STATUS_MATCH if abs(diff) < DIFF_TOLERANCE else STATUS_DIFF
             results.append(_make_result(
                 status, ota, rezen_records[ri], oamt, ramt, oid,
                 _norm_orderno(rezen_records[ri].get("ext_order", ""))
             ))
         else:
             # 失败->ota_only
-            results.append(_make_result("ota_only", ota, None, oamt, 0, oid, ""))
+            results.append(_make_result(STATUS_OTA_ONLY, ota, None, oamt, 0, oid, ""))
 
     _append_unmatched_pms(results, rezen_records, rezen_matched)
     stats = _calc_stats(results,len(ota_records),len(rezen_records))
@@ -235,16 +238,16 @@ def _match_ota_rezen_fnb(ota_records, rezen_records, channel_name):
         diff_amt = round(ota_amt_total - pms_amt_total, 2)
 
         if ota_cnt == pms_cnt and ota_cnt > 0:
-            status = "match"
+            status = STATUS_MATCH
             stats["match"] += 1
         elif ota_cnt > 0 and pms_cnt == 0:
-            status = "ota_only"
+            status = STATUS_OTA_ONLY
             stats["ota_only"] += 1
         elif pms_cnt > 0 and ota_cnt == 0:
-            status = "pms_only"
+            status = STATUS_PMS_ONLY
             stats["pms_only"] += 1
         else:
-            status = "diff"
+            status = STATUS_DIFF
             stats["diff"] += 1
 
         results.append({
@@ -309,13 +312,13 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
             pms_amt = _norm_amount(pms_list[idx].get("amount", 0))
             diff = round(amt - pms_amt, 2)
             is_card_full = ("储值" in pay_type and pms_amt == 0 and amt > 0)
-            status = "match" if (abs(diff) < DIFF_TOLERANCE or is_card_full) else "diff"
+            status = STATUS_MATCH if (abs(diff) < DIFF_TOLERANCE or is_card_full) else STATUS_DIFF
             results.append(_make_result(
                 status, ota, pms_list[idx], amt, pms_amt, oid,
                 _norm_orderno(pms_list[idx].get("ext_order", ""))
             ))
         else:
-            results.append(_make_result("ota_only", ota, None, amt, 0, oid, ""))
+            results.append(_make_result(STATUS_OTA_ONLY, ota, None, amt, 0, oid, ""))
 
     _append_unmatched_pms(results, pms_list, used)
     return results, _calc_stats(results,len(ota_list),len(pms_list))

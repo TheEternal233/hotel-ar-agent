@@ -4,7 +4,7 @@ from typing import List
 
 from fastapi import HTTPException
 
-from .aggregator import aggregate_daily_check
+from .aggregator import aggregate_daily_check, auto_aggregate_daily_check
 
 
 def daily_check_handler(ota_paths: List[str], card_paths: List[str]) -> str:
@@ -35,6 +35,35 @@ def daily_check_handler(ota_paths: List[str], card_paths: List[str]) -> str:
             "汇总完成，请下载汇总文件查看详细数据。",
             "=" * 60,
         ])
+
+        return "\n".join(lines)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"汇总失败: {e}")
+
+
+def auto_daily_check_handler() -> str:
+    """自动扫描 output 目录下的对账结果并汇总"""
+    try:
+        output_path = auto_aggregate_daily_check()
+
+        lines = [
+            "=" * 60,
+            "           每日夜审汇总报告（自动模式）",
+            "=" * 60,
+            "",
+            f"汇总文件: {output_path}",
+            "",
+            "数据来源:",
+            "  - OTA对账结果: output/OTA对账/",
+            "  - 信用卡对账结果: output/信用卡审核/",
+            "",
+            "=" * 60,
+            "汇总完成，请下载汇总文件查看详细数据。",
+            "=" * 60,
+        ]
 
         return "\n".join(lines)
 

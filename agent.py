@@ -1,7 +1,7 @@
 from langchain_core.messages import SystemMessage
 
 
-from tools.night_audit import night_audit_tool
+from tools.night_audit import night_audit_tool, auto_night_audit_tool
 from tools.protocol_settlement.aging_pms import aging_analysis, aging_and_notice
 from tools.search import bocha_search
 from tools.ar_recon import ar_recon
@@ -19,8 +19,9 @@ TOOLS = [bocha_search,
          aging_analysis,
          aging_and_notice,
          night_audit_tool,#每日夜审汇总
+         auto_night_audit_tool,#自动夜审汇总（一键）
          ctrip_commission,#携程佣金
-         daily_night_audit_check,
+         daily_night_audit_check,#夜审报表与台账比对
          daily_ar_processing,
          credit_card_recon,
          data_integration]

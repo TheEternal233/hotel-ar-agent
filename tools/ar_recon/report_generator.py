@@ -10,22 +10,21 @@ from enums.common_enum import (
 )
 from tools.doc_parser import read_sheet
 from utils.ar_recon_utils import _copy_sheet_to_wb
-
-
-REPORT_FILENAME_FMT = "OTA对账_{}_{}.xlsx"
-XIANGMINIAO_OTA_SHEET = "财务总对账"
-SHEET_SUMMARY = "对账汇总"
-SHEET_DIFF = "差额明细"
-SHEET_FULL = "全额对比"
-STATUS_MATCH = "match"
-STATUS_DIFF = "diff"
-STATUS_OTA_ONLY = "ota_only"
-STATUS_PMS_ONLY = "pms_only"
+from tools.ar_recon.constants import (
+    REPORT_FILENAME_FMT, XIANGMINIAO_OTA_SHEET,
+    SHEET_SUMMARY, SHEET_DIFF, SHEET_FULL,
+    STATUS_MATCH, STATUS_DIFF, STATUS_OTA_ONLY, STATUS_PMS_ONLY,
+    STD_DIFF_HDRS, STD_FULL_HDRS, FNB_DIFF_HDRS, FNB_FULL_HDRS,
+    AR_DIFF_HDRS, STATUS_ORDER,
+    OTA_RECON_DIR, OTA_PREFIX, PMS_PREFIX,
+)
 
 def _make_out_path(channel_name):
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     cname = channel_name.replace("·", "_")
-    return os.path.join(OUT_DIR, REPORT_FILENAME_FMT.format(cname, now))
+    ota_dir = os.path.join(OUT_DIR, OTA_RECON_DIR)
+    os.makedirs(ota_dir, exist_ok=True)
+    return os.path.join(ota_dir, REPORT_FILENAME_FMT.format(cname, now))
 
 
 def _init_workbook(ar_mode=False, ota_path=None, pms_path=None):
@@ -39,12 +38,12 @@ def _init_workbook(ar_mode=False, ota_path=None, pms_path=None):
         src_wb = openpyxl.load_workbook(ota_path, data_only=False)
         try:
             for ws in src_wb.worksheets:
-                new_title = "OTA" if ws.title == XIANGMINIAO_OTA_SHEET else None
+                new_title = OTA_PREFIX if ws.title == XIANGMINIAO_OTA_SHEET else None
                 _copy_sheet_to_wb(ws, wb, title=new_title)
         finally:
             src_wb.close()
     else:
-        for path, prefix in ((pms_path, "PMS"), (ota_path, "OTA")):
+        for path, prefix in ((pms_path, PMS_PREFIX), (ota_path, OTA_PREFIX)):
             src_wb = openpyxl.load_workbook(path, data_only=False)
             try:
                 for idx, ws in enumerate(src_wb.worksheets):
@@ -110,8 +109,7 @@ def _save_and_close(wb, out_path):
 
 
 
-_STD_DIFF_HDRS = ["OTA订单号", "PMS外部订单号", "OTA金额", "PMS金额", "差额", "状态", "房号", "PMS备注"]
-_STD_FULL_HDRS = ["状态", "OTA订单号", "PMS外部订单号", "OTA金额", "PMS金额", "差额", "房号"]
+
 
 
 def _std_diff_cols(r):
@@ -146,9 +144,9 @@ def _build_std_info(results, stats, channel_name, ota_path, pms_path):
         ("仅OTA存在", stats["ota_only"]),
         ("仅PMS存在", stats["pms_only"]),
         ("", ""),
-        ("OTA金额合计", round(sum(r["ota_amount"] for r in results if r["status"] != "pms_only"), 2)),
-        ("PMS金额合计", round(sum(r["pms_amount"] for r in results if r["status"] != "ota_only"), 2)),
-        ("净差异", round(sum(r["diff"] for r in results if r["status"] == "diff"), 2)),
+        ("OTA金额合计", round(sum(r["ota_amount"] for r in results if r["status"] != STATUS_PMS_ONLY), 2)),
+        ("PMS金额合计", round(sum(r["pms_amount"] for r in results if r["status"] != STATUS_OTA_ONLY), 2)),
+        ("净差异", round(sum(r["diff"] for r in results if r["status"] == STATUS_DIFF), 2)),
     ]
 
 
@@ -156,10 +154,6 @@ def _std_red_check(k, v):
     return "差异" in str(k) and isinstance(v, (int, float)) and v != 0
 
 
-
-
-_FNB_DIFF_HDRS = ["金额", "OTA数量", "PMS数量", "数量差异", "OTA金额", "PMS金额", "金额差异", "状态", "OTA券号", "PMS结账单号"]
-_FNB_FULL_HDRS = ["状态", "金额", "OTA数量", "PMS数量", "数量差异", "OTA金额", "PMS金额", "金额差异", "OTA券号", "PMS结账单号"]
 
 
 def _fnb_diff_cols(r):
@@ -194,7 +188,7 @@ def _build_fnb_info(results, stats, channel_name, ota_path, pms_path):
         ("", ""),
         ("OTA金额合计", stats.get("ota_amount_total", 0)),
         ("PMS金额合计", stats.get("pms_amount_total", 0)),
-        ("净金额差异", round(sum(r["diff_amount"] for r in results if r["status"] == "diff"), 2)),
+        ("净金额差异", round(sum(r["diff_amount"] for r in results if r["status"] == STATUS_DIFF), 2)),
     ]
 
 
@@ -212,11 +206,11 @@ def _generate_report(results, stats, channel_name, ota_path, pms_path):
     _write_summary_block(ws1, 1, _build_std_info(results, stats, channel_name, ota_path, pms_path), _std_red_check)
 
     ws2 = wb.create_sheet(SHEET_DIFF)
-    _write_headers(ws2, 1, _STD_DIFF_HDRS)
+    _write_headers(ws2, 1, STD_DIFF_HDRS)
     _write_data_rows(ws2, 2, results, _std_diff_cols, skip_match=True)
 
     ws3 = wb.create_sheet(SHEET_FULL)
-    _write_headers(ws3, 1, _STD_FULL_HDRS)
+    _write_headers(ws3, 1, STD_FULL_HDRS)
     _write_data_rows(ws3, 2, results, _std_full_cols, skip_match=False)
 
     return _save_and_close(wb, out_path)
@@ -234,12 +228,12 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
 
     row += 1
     row = _write_section_title(ws, row, "差额明细（仅展示未匹配/有差异的记录）")
-    row = _write_headers(ws, row, _STD_DIFF_HDRS)
+    row = _write_headers(ws, row, STD_DIFF_HDRS)
     row = _write_data_rows(ws, row, results, _std_diff_cols, skip_match=True)
 
     row += 1
     row = _write_section_title(ws, row, "全额对比（含匹配记录）")
-    row = _write_headers(ws, row, _STD_FULL_HDRS)
+    row = _write_headers(ws, row, STD_FULL_HDRS)
     row = _write_data_rows(ws, row, results, _std_full_cols, skip_match=False)
 
     return _save_and_close(wb, out_path)
@@ -257,12 +251,12 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
 
     row += 1
     row = _write_section_title(ws, row, "差额明细（按金额分组，仅展示数量不一致的记录）")
-    row = _write_headers(ws, row, _FNB_DIFF_HDRS)
+    row = _write_headers(ws, row, FNB_DIFF_HDRS)
     row = _write_data_rows(ws, row, results, _fnb_diff_cols, skip_match=True)
 
     row += 1
     row = _write_section_title(ws, row, "全额对比（含数量匹配记录）")
-    row = _write_headers(ws, row, _FNB_FULL_HDRS)
+    row = _write_headers(ws, row, FNB_FULL_HDRS)
     row = _write_data_rows(ws, row, results, _fnb_full_cols, skip_match=False)
 
     return _save_and_close(wb, out_path)
@@ -298,8 +292,7 @@ def _generate_ar_report_a(results,stats,channel_name,ota_path,pms_path):
             if bid:
                 bill_to_result[bid]=r
 
-    diff_hdrs=["状态","OTA单号","OTA金额","差额","备注"]
-    all_hdrs=pms_headers + diff_hdrs
+    all_hdrs=pms_headers + AR_DIFF_HDRS
 
     n_pms=len(pms_headers)
     _write_headers(ws,1,all_hdrs)

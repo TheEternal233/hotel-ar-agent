@@ -29,7 +29,7 @@ def _generate_recon_report(recon_results):
     Returns:
         str: 含各付款方式差异摘要与报告路径的文本
     """
-    out_dir = os.path.join(BASE_DIR, "output")
+    out_dir = os.path.join(BASE_DIR, "output", "信用卡审核")
     os.makedirs(out_dir, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = os.path.join(out_dir, f"对账差异报告_{now}.xlsx")
@@ -151,25 +151,3 @@ def _generate_recon_report(recon_results):
         )
 
     return "对账完成\n"+"\n".join(summary_lines)+f"\n\n报告: {out_path}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

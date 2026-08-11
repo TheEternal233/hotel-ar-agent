@@ -3,8 +3,8 @@ from typing import List
 
 from langchain_core.tools import tool
 
-from .aggregator import aggregate_daily_check
-from .api import daily_check_handler
+from .aggregator import aggregate_daily_check, auto_aggregate_daily_check
+from .api import daily_check_handler, auto_daily_check_handler
 
 
 @tool
@@ -27,5 +27,22 @@ def night_audit_tool(ota_paths:List[str],card_paths:List[str])->str:
         return f"夜审汇总失败：{e}"
 
 
+@tool
+def auto_night_audit_tool() -> str:
+    """
+    自动夜审汇总工具。无需传入文件路径，自动扫描 output/OTA对账/ 和 output/信用卡审核/ 目录下的最新对账结果文件，
+    汇总生成单一夜审Excel报表。
 
-__all__ = ["aggregate_daily_check", "daily_check_handler","night_audit_tool"]
+    当用户要求自动进行夜审汇总、一键夜审、或说"自动生成夜审报告"时调用此工具。
+    不需要任何参数，自动读取output目录下的对账结果。
+
+    Returns:
+        汇总报告文本，包含生成文件路径和统计信息
+    """
+    try:
+        return auto_daily_check_handler()
+    except Exception as e:
+        return f"自动夜审汇总失败：{e}"
+
+
+__all__ = ["aggregate_daily_check", "auto_aggregate_daily_check", "daily_check_handler", "auto_daily_check_handler", "night_audit_tool", "auto_night_audit_tool"]

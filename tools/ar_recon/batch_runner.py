@@ -9,15 +9,11 @@ from tools.ar_recon.report_generator import _generate_report, _generate_ar_repor
     _generate_ar_report_a
 from tools.doc_parser import detect_ota_channel, read_ota_channel, read_rezen
 from utils.ar_recon_utils import read_xiangminiao
-
-SUPPORTED_EXTS = (".xlsx", ".xls")
-PMS_MARKER = "rezen"
-DEFAULT_DATA_SUBDIR = ("data", "清远", "OTA对账")
-SUMMARY_FILENAME_FMT = "OTA对账_全部汇总_{}.xlsx"
-SUMMARY_SHEET_NAME = "渠道汇总"
-SUMMARY_HEADERS = ["渠道", "OTA文件", "OTA记录", "PMS记录", "匹配", "差异", "仅OTA", "仅PMS", "报告文件"]
-HIGHLIGHT_COLS = {5, 6, 7, 8}
-PREFIX_MATCH_LEN = 2
+from tools.ar_recon.constants import (
+    SUPPORTED_EXTS, PMS_MARKER, DEFAULT_DATA_SUBDIR, SUMMARY_FILENAME_FMT,
+    SUMMARY_SHEET_NAME, SUMMARY_HEADERS, HIGHLIGHT_COLS, PREFIX_MATCH_LEN,
+    OTA_RECON_DIR,
+)
 
 def batch_ota_recon(data_dir=None):
     if data_dir is None:
@@ -45,7 +41,7 @@ def batch_ota_recon(data_dir=None):
         ota_base = os.path.splitext(ota_file)[0]
         # Strip trailing digits for files like 飞猪1, 飞猪2
         channel = detect_ota_channel(ota_path)
-        if channel is None or channel == "rezen":
+        if channel is None or channel == PMS_MARKER:
             continue
 
         if channel == "向蜜鸟":
@@ -107,7 +103,9 @@ def batch_ota_recon(data_dir=None):
         all_reports.append(report_path)
 
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    summary_path = os.path.join(OUT_DIR, SUMMARY_FILENAME_FMT.format(now))
+    ota_dir = os.path.join(OUT_DIR, OTA_RECON_DIR)
+    os.makedirs(ota_dir, exist_ok=True)
+    summary_path = os.path.join(ota_dir, SUMMARY_FILENAME_FMT.format(now))
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = SUMMARY_SHEET_NAME

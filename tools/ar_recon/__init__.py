@@ -1,6 +1,6 @@
 import os, re
 from langchain.tools import tool
-from tools.ar_recon.constants import FNB_CHANNELS
+from tools.ar_recon.constants import FNB_CHANNELS, PMS_MARKER, SUPPORTED_EXTS
 from enums.common_enum import OUT_DIR
 from tools.ar_recon.matcher import _match_ota_rezen, _match_ota_rezen_fnb, match_xiangminiao
 from tools.ar_recon.batch_runner import batch_ota_recon
@@ -10,8 +10,6 @@ from tools.doc_parser import read_ota_channel, read_rezen, detect_ota_channel
 from utils.ar_recon_utils import read_xiangminiao
 
 os.makedirs(OUT_DIR, exist_ok=True)
-
-PMS_MARKER = "rezen"
 
 def _cleanup_uploads(paths):
     for f in paths:
@@ -39,7 +37,7 @@ def _process_single_channel(ota_path, pms_path, channel):
     return results, stats, report_path
 
 def _build_upload_pairs(upload_dir):
-    files = sorted([f for f in os.listdir(upload_dir) if f.endswith((".xlsx", ".xls"))])
+    files = sorted([f for f in os.listdir(upload_dir) if f.endswith(SUPPORTED_EXTS)])
     if not files:
         return [], []
 
@@ -57,7 +55,7 @@ def _build_upload_pairs(upload_dir):
     for ota_file in ota_files:
         ota_path = os.path.join(upload_dir, ota_file)
         channel = detect_ota_channel(ota_path)
-        if channel is None or channel == "rezen":
+        if channel is None or channel == PMS_MARKER:
             continue
 
         if channel == "向蜜鸟":
@@ -163,7 +161,7 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
 
     if not channel:
         channel = detect_ota_channel(ota_path)
-        if channel is None or channel == "rezen":
+        if channel is None or channel == PMS_MARKER:
             return f"无法自动检测渠道，请手动指定 channel 参数。"
 
     try:
