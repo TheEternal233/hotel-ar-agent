@@ -13,8 +13,6 @@ from tools.ctrip_commission_reconcile.CtripCommissionParser import CtripCommissi
 from tools.ctrip_commission_reconcile.PmsParser import PmsParser
 from openpyxl.styles import PatternFill, Alignment
 
-from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER
-
 logger=logging.getLogger(__name__)
 # 状态颜色映射
 _STATUS_FILL = {
@@ -24,10 +22,8 @@ _STATUS_FILL = {
     "NO_PMS_PRICE": PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid"),  # 淡黄
     "PMS_ONLY": PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid"),      # 淡蓝
 }
-# 项目根目录（tools/ 的上一级）
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-UPLOAD_DIR = os.path.join(_BASE_DIR, "uploads")
-OUTPUT_DIR = os.path.join(_BASE_DIR, "output")
+from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER
+from enums.paths import BASE_DIR, UPLOAD_DIR, OUTPUT_DIR
 
 
 def _apply_header_style(ws):

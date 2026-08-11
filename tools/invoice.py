@@ -8,9 +8,8 @@ from openpyxl.styles import Font
 
 from tools.doc_parser import read_rezen, read_sheet
 from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER, YELLOW_FILL
+from enums.paths import BASE_DIR, OUTPUT_DIR as OUT_DIR
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_DIR = os.path.join(BASE_DIR, "output")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # 发票税率配置

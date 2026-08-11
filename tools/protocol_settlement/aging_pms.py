@@ -17,17 +17,10 @@ from .doc_parser_pms import read_pms_receivable, _parse_date
 
 
 # ========== 路径配置 ==========
+from enums.paths import BASE_DIR, OUTPUT_DIR
+
 # 模板文件与工具脚本放在同级目录下
 TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "附件二 应收账龄分析表.xlsx")
-# 输出目录：根目录下的 output 文件夹
-# 当前脚本绝对路径
-CURR_FILE = os.path.abspath(__file__)
-# 当前脚本所在文件夹
-CURR_DIR = os.path.dirname(CURR_FILE)
-# 向上回溯2层，抵达项目根目录（根据你的层级修改数字！）
-PROJECT_ROOT = os.path.dirname(os.path.dirname(CURR_DIR))
-# 项目根目录/output
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 
 # ========== 样式常量（与原有aging.py保持一致）==========
 from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER, RED_FILL, YELLOW_FILL
@@ -284,7 +277,7 @@ def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=F
     if not keep_source:
         try:
             p=Path(receivable_path).resolve()
-            base=Path(PROJECT_ROOT).resolve()
+            base=BASE_DIR.resolve()
             if str(p).startswith(str(base)) and p.exists():
                 os.remove(receivable_path)
         except Exception:

@@ -1,16 +1,14 @@
 import logging
 from pathlib import Path
 
+from enums.paths import BASE_DIR, UPLOAD_DIR, OUTPUT_DIR, FRONTEND_DIR
+
 from graph import build_graph
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 _graph = None
-BASE_DIR = Path(__file__).parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-OUTPUT_DIR = BASE_DIR / "output"
-FRONTEND_DIR = BASE_DIR / "frontend"
 
 
 def get_graph():
@@ -21,13 +19,17 @@ def get_graph():
 
 
 def cleanup_uploads(file_paths: list[str]):
+    if not file_paths:
+        return
+    resolved_upload = UPLOAD_DIR.resolve()
     for p in file_paths:
         try:
-            fp = Path(p)
-            if fp.exists() and UPLOAD_DIR in fp.parents:
+            fp = Path(p).resolve()
+            if fp.exists() and resolved_upload in fp.parents:
                 fp.unlink()
-        except OSError:
-            pass
+                logger.info(f"已清理上传文件: {fp}")
+        except OSError as e:
+            logger.warning(f"清理文件失败: {fp} — {e}")
 
 
 def is_safe_path(target: Path, base: Path) -> bool:

@@ -97,7 +97,6 @@
     }
     s.textContent = uploadedFiles.length ? uploadedFiles.length + " 个文件" : "";
     e.target.value = "";
-    uploadedFiles.length = 0;
   }
   window.handleUpload = handleUpload;
 
@@ -107,6 +106,8 @@
     if (!msg) return; addMsg("user", msg); input.value = "";
     var filePaths = uploadedFiles.map(function(f) { return f.path; });
     streamChat(msg, filePaths);
+    uploadedFiles.length = 0;
+    document.getElementById("uploadStatus").textContent = "";
   }
   window.sendMessage = sendMessage;
 
