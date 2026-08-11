@@ -12,7 +12,7 @@ try:
 except ImportError:
     tool = None
 from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill, Border, Side
+from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from . import generate_payment_notices
@@ -33,14 +33,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(CURR_DIR))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
 
 # ========== 样式常量（与原有aging.py保持一致）==========
-RED_FILL = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
-YELLOW_FILL = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
-HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-HEADER_FONT = Font(color="FFFFFF", bold=True)
-THIN_BORDER = Border(
-    left=Side(style="thin"), right=Side(style="thin"),
-    top=Side(style="thin"), bottom=Side(style="thin")
-)
+from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER, RED_FILL, YELLOW_FILL
+
 TOTAL_FILL = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")
 
 # ========== 账龄分段定义 ==========

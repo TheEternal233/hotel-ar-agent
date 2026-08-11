@@ -4,19 +4,14 @@ import os
 from datetime import datetime
 from langchain.tools import tool
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Border, Side
+from openpyxl.styles import Font
 
 from tools.doc_parser import read_rezen, read_sheet
+from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER, YELLOW_FILL
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(BASE_DIR, "output")
 os.makedirs(OUT_DIR, exist_ok=True)
-
-HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-HEADER_FONT = Font(color="FFFFFF", bold=True)
-THIN_BORDER = Border(left=Side(style="thin"), right=Side(style="thin"),
-                     top=Side(style="thin"), bottom=Side(style="thin"))
-YELLOW_FILL = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
 
 # 发票税率配置
 TAX_RATES = {"住宿": 0.06, "餐饮": 0.06, "SPA": 0.06, "会议": 0.06, "其他": 0.06}

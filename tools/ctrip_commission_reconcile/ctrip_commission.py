@@ -11,18 +11,11 @@ from langchain_core.tools import tool
 from tools.ctrip_commission_reconcile.CommissionReconciler import CommissionReconciler
 from tools.ctrip_commission_reconcile.CtripCommissionParser import CtripCommissionParser
 from tools.ctrip_commission_reconcile.PmsParser import PmsParser
-from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+from openpyxl.styles import PatternFill, Alignment
+
+from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER
 
 logger=logging.getLogger(__name__)
-
-
-_HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-_HEADER_FONT = Font(color="FFFFFF", bold=True)
-_THIN_BORDER = Border(
-    left=Side(style="thin"), right=Side(style="thin"),
-    top=Side(style="thin"), bottom=Side(style="thin")
-)
-_RED_FILL = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
 # 状态颜色映射
 _STATUS_FILL = {
     "OK":           PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"),  # 淡绿
@@ -40,9 +33,9 @@ OUTPUT_DIR = os.path.join(_BASE_DIR, "output")
 def _apply_header_style(ws):
     """给表头应用统一样式"""
     for cell in ws[1]:
-        cell.fill=_HEADER_FILL
-        cell.font=_HEADER_FONT
-        cell.border=_THIN_BORDER
+        cell.fill=HEADER_FILL
+        cell.font=HEADER_FONT
+        cell.border=THIN_BORDER
         cell.alignment=Alignment(horizontal="center", vertical="center")
 
 def _find_status_col_idx(df:pd.DataFrame)->Optional[int]:
@@ -59,7 +52,7 @@ def _apply_row_style(ws,min_row:int,max_row:int,status_col_idx:Optional[int]=Non
         status_val=row[status_col_idx-1].value if status_col_idx else None
         fill=_STATUS_FILL.get(status_val)
         for cell in row:
-            cell.border=_THIN_BORDER
+            cell.border=THIN_BORDER
             cell.alignment=Alignment(vertical="center")
             if fill:
                 cell.fill=fill
@@ -190,6 +183,3 @@ def ctrip_commission(ctrip_filename:str,pms_filename:Optional[str]=None)->str:
         )
 
     return f"{base_msg} pms=skipped (parsed only)"
-
-
-

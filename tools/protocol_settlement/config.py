@@ -1,7 +1,8 @@
 import os
 from pathlib import Path
 
-from openpyxl.styles import Border, Side
+from enums.common_enum import THIN_BORDER
+
 BASE_DIR=Path(__file__).resolve().parent
 # 模板路径
 
@@ -34,9 +35,3 @@ class DetailCols:
 # 默认值
 DEFAULT_ADJUSTMENT = -0.01
 DEFAULT_DUE_DAYS = 30
-
-# 样式
-THIN_BORDER = Border(
-    left=Side(style="thin"), right=Side(style="thin"),
-    top=Side(style="thin"), bottom=Side(style="thin")
-)

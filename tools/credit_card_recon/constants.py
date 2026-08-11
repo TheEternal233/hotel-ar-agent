@@ -4,18 +4,7 @@
 挂应收、挂房账、挂团队、OC、ENT、YFD 等付款方式一律不统计。
 """
 
-from openpyxl.styles import Font, PatternFill, Border, Side
-
-# ===== Excel 样式 =====
-HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-HEADER_FONT = Font(color="FFFFFF", bold=True)
-THIN_BORDER = Border(
-    left=Side(style="thin"), right=Side(style="thin"),
-    top=Side(style="thin"), bottom=Side(style="thin"),
-)
-RED_FILL = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
-YELLOW_FILL = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
-GREEN_FILL = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")
+from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER, RED_FILL, YELLOW_FILL, GREEN_FILL
 
 # ===== 对账配置 =====
 

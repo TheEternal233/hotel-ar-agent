@@ -3,13 +3,9 @@ import os
 from datetime import datetime
 from langchain.tools import tool
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Border, Side
 from tools import BASE_DIR
 from tools.doc_parser import read_sheet
-
-HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-HEADER_FONT = Font(color="FFFFFF", bold=True)
-THIN_BORDER = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER
 
 
 @tool
