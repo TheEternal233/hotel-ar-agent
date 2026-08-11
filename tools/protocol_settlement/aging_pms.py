@@ -7,10 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import  Dict, Any
 
-try:
-    from langchain.tools import tool
-except ImportError:
-    tool = None
+from langchain.tools import tool
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -244,151 +241,136 @@ def _write_aging_report(result: Dict[str, Any], template_path: str, output_path:
 
 # ========== 前端可调用的Tool接口 ==========
 
-if tool is not None:
-    @tool
-    def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=False,generate_notice: bool = True) -> str:
-        """PMS应收账龄分析：读取PMS应收账务列表xlsx，按协议单位分组汇总，以交易日期计算账龄，
-        使用余额作为未核销金额，生成账龄分析报表。
-        默认同时生成付款通知书
-        """
-        if not os.path.exists(receivable_path):
-            return f"错误：源文件不存在 {receivable_path}"
-        if not os.path.exists(TEMPLATE_PATH):
-            return f"错误：模板文件不存在 {TEMPLATE_PATH}"
+@tool
+def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=False,generate_notice: bool = True) -> str:
+    """PMS应收账龄分析：读取PMS应收账务列表xlsx，按协议单位分组汇总，以交易日期计算账龄，
+    使用余额作为未核销金额，生成账龄分析报表。
+    默认同时生成付款通知书
+    """
+    if not os.path.exists(receivable_path):
+        return f"错误：源文件不存在 {receivable_path}"
+    if not os.path.exists(TEMPLATE_PATH):
+        return f"错误：模板文件不存在 {TEMPLATE_PATH}"
 
-        # 解析截止日期
-        if not as_of_date:
-            as_of_date_dt = datetime.now()
-        else:
-            as_of_date_dt = _parse_date(as_of_date) or datetime.now()
+    if not as_of_date:
+        as_of_date_dt = datetime.now()
+    else:
+        as_of_date_dt = _parse_date(as_of_date) or datetime.now()
 
-        # 执行分析
-        result = _analyze_pms_data(receivable_path, as_of_date_dt)
+    result = _analyze_pms_data(receivable_path, as_of_date_dt)
 
-        # 确保输出目录存在
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-        # 生成输出路径
-        output_path = os.path.join(OUTPUT_DIR, f"应收账龄分析报表_{as_of_date_dt.strftime('%Y%m%d')}.xlsx")
+    output_path = os.path.join(OUTPUT_DIR, f"应收账龄分析报表_{as_of_date_dt.strftime('%Y%m%d')}.xlsx")
 
-        # 写入报表
-        _write_aging_report(result, TEMPLATE_PATH, output_path)
+    _write_aging_report(result, TEMPLATE_PATH, output_path)
 
-        # 默认生成付款通知书
-        notice_result=""
-        if generate_notice and os.path.exists(receivable_path):
-            try:
-                # 推断账期月份
-                row_records=read_pms_receivable(receivable_path)
-                dates=[r.get("date") for r in row_records if r.get("date") and r.get("type")=="借方"]
-                if dates:
-                    notice_month=max(dates).strftime("%Y-%m")
-                else:
-                    notice_month=datetime.now().strftime("%Y-%m")
-                notice_result=generate_payment_notices(
-                    receivable_path=receivable_path,
-                    notice_month=notice_month,
-                )
-            except Exception as e:
-                notice_result=f"付款通知书生成失败:{e}"
-
-        if not keep_source:
-            # 处理完之后删除上传的源文件
-            try:
-                p=Path(receivable_path).resolve()
-                base=Path(PROJECT_ROOT).resolve()
-                if str(p).startswith(str(base)) and p.exists():
-                    os.remove(receivable_path)
-            except Exception:
-                pass
-
-        # 构建返回摘要
-        lines = [
-            f"账龄分析完成: {output_path}",
-            f"截止日期: {as_of_date_dt.strftime('%Y-%m-%d')}",
-            f"客户数: {result['customer_count']}",
-            f"应收总额: {result['total_amount']:,.2f}",
-            "",
-            "账龄分布:",
-        ]
-
-        for _, bname, bkey in AGING_BRACKETS:
-            val = result["grand_total"].get(bkey, 0)
-            lines.append(f"  {bname}: {val:,.2f}")
-
-        lines.append("")
-        lines.append("客户明细:")
-        for corp_name, data in sorted(result["customers"].items(), key=lambda x: -x[1]["total"]):
-            lines.append(f"  {corp_name:30} 合计: {data['total']:>12,.2f}  账号: {data['account_no']}")
-
-        if notice_result:
-            lines.extend([
-                "",
-                "=" * 60,
-                "                   付款通知书生成结果",
-                "=" * 60,
-                notice_result,
-            ])
-        return "\n".join(lines)
-
-    @tool
-    def aging_and_notice(
-        receivable_path: str,
-        as_of_date: str = "",
-        notice_month: str = "",
-        output_dir: str = "",
-        notice_date: str = "",
-        due_date: str = "",
-    ) -> str:
-        """PMS账龄分析与付款通知书联合生成
-        先执行应收账龄分析，再基于同一数据源为各协议客户生成付款通知书。
-        全部完成后统一删除源文件。
-        """
-        # 1. 账龄分析（保留源文件）
-        aging_result = aging_analysis.invoke({
-            "receivable_path": receivable_path,
-            "as_of_date": as_of_date,
-            "keep_source": True,
-            "generate_notice": False, #避免重复生成
-        })
-        if aging_result.startswith("错误"):
-            return aging_result
-        # 2. 推断付款通知书账期
-        if not notice_month:
-            raw_records = read_pms_receivable(receivable_path)
-            dates = [r.get("date") for r in raw_records if r.get("date") and r.get("type") == "借方"]
-            if dates:
-                notice_month = max(dates).strftime("%Y-%m")
-            else:
-                notice_month = datetime.now().strftime("%Y-%m")
-        # 3. 生成付款通知书
-        notice_result = generate_payment_notices(
-            receivable_path=receivable_path,
-            notice_month=notice_month,
-            output_dir=output_dir,
-            notice_date=notice_date or None,
-            due_date=due_date or None,
-        )
-        # 4. 统一清理源文件
+    notice_result=""
+    if generate_notice and os.path.exists(receivable_path):
         try:
-            if os.path.exists(receivable_path):
+            row_records=read_pms_receivable(receivable_path)
+            dates=[r.get("date") for r in row_records if r.get("date") and r.get("type")=="借方"]
+            if dates:
+                notice_month=max(dates).strftime("%Y-%m")
+            else:
+                notice_month=datetime.now().strftime("%Y-%m")
+            notice_result=generate_payment_notices(
+                receivable_path=receivable_path,
+                notice_month=notice_month,
+            )
+        except Exception as e:
+            notice_result=f"付款通知书生成失败:{e}"
+
+    if not keep_source:
+        try:
+            p=Path(receivable_path).resolve()
+            base=Path(PROJECT_ROOT).resolve()
+            if str(p).startswith(str(base)) and p.exists():
                 os.remove(receivable_path)
         except Exception:
             pass
 
-        # 5. 组合返回
-        return "\n".join([
-            "=" * 70,
-            "                     账龄分析 + 付款通知书 联合生成报告",
-            "=" * 70, "",
-            aging_result, "",
-            "-" * 70, "",
-            notice_result, "",
-            "=" * 70,
-            "全部任务完成，源文件已清理。",
-            "=" * 70,
-        ])
+    lines = [
+        f"账龄分析完成: {output_path}",
+        f"截止日期: {as_of_date_dt.strftime('%Y-%m-%d')}",
+        f"客户数: {result['customer_count']}",
+        f"应收总额: {result['total_amount']:,.2f}",
+        "",
+        "账龄分布:",
+    ]
 
-else:
-    aging_analysis = None
-    aging_and_notice = None
+    for _, bname, bkey in AGING_BRACKETS:
+        val = result["grand_total"].get(bkey, 0)
+        lines.append(f"  {bname}: {val:,.2f}")
+
+    lines.append("")
+    lines.append("客户明细:")
+    for corp_name, data in sorted(result["customers"].items(), key=lambda x: -x[1]["total"]):
+        lines.append(f"  {corp_name:30} 合计: {data['total']:>12,.2f}  账号: {data['account_no']}")
+
+    if notice_result:
+        lines.extend([
+            "",
+            "=" * 60,
+            "                   付款通知书生成结果",
+            "=" * 60,
+            notice_result,
+        ])
+    return "\n".join(lines)
+
+
+@tool
+def aging_and_notice(
+    receivable_path: str,
+    as_of_date: str = "",
+    notice_month: str = "",
+    output_dir: str = "",
+    notice_date: str = "",
+    due_date: str = "",
+) -> str:
+    """PMS账龄分析与付款通知书联合生成
+    先执行应收账龄分析，再基于同一数据源为各协议客户生成付款通知书。
+    全部完成后统一删除源文件。
+    """
+    aging_result = aging_analysis.invoke({
+        "receivable_path": receivable_path,
+        "as_of_date": as_of_date,
+        "keep_source": True,
+        "generate_notice": False,
+    })
+    if aging_result.startswith("错误"):
+        return aging_result
+
+    if not notice_month:
+        raw_records = read_pms_receivable(receivable_path)
+        dates = [r.get("date") for r in raw_records if r.get("date") and r.get("type") == "借方"]
+        if dates:
+            notice_month = max(dates).strftime("%Y-%m")
+        else:
+            notice_month = datetime.now().strftime("%Y-%m")
+
+    notice_result = generate_payment_notices(
+        receivable_path=receivable_path,
+        notice_month=notice_month,
+        output_dir=output_dir,
+        notice_date=notice_date or None,
+        due_date=due_date or None,
+    )
+
+    try:
+        if os.path.exists(receivable_path):
+            os.remove(receivable_path)
+    except Exception:
+        pass
+
+    return "\n".join([
+        "=" * 70,
+        "                     账龄分析 + 付款通知书 联合生成报告",
+        "=" * 70, "",
+        aging_result, "",
+        "-" * 70, "",
+        notice_result, "",
+        "=" * 70,
+        "全部任务完成，源文件已清理。",
+        "=" * 70,
+    ])

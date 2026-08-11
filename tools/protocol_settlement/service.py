@@ -95,28 +95,3 @@ def generate_payment_notices(
         lines.extend(f"  {f}" for f in failed_corps)
 
     return "\n".join(lines)
-
-
-# LangChain Tool
-try:
-    from langchain.tools import tool
-
-    @tool
-    def payment_notice_tool(
-        receivable_path: str,
-        notice_month: str,
-        output_dir: str = "",
-        notice_date: str = "",
-        due_date: str = "",
-    ) -> str:
-        """PMS付款通知书生成，利用该工具可以生成对应的付款通知单"""
-        return generate_payment_notices(
-            receivable_path=receivable_path,
-            notice_month=notice_month,
-            output_dir=output_dir,
-            notice_date=notice_date or None,
-            due_date=due_date or None,
-        )
-except ImportError:
-    payment_notice_tool = None
-

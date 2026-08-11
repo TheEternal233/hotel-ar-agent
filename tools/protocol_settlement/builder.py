@@ -137,12 +137,15 @@ def fill_notice_template(corp_name: str, data: Dict[str, Any],
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        logo_path = Path(__file__).parent / "logo.png"  # 把 logo.png 放在同一目录
+        logo_path = Path(__file__).parent / "logo.png"
         if logo_path.exists():
-            logo = XLImage(str(logo_path))
-            logo.width = 180
-            logo.height = 60
-            ws.add_image(logo, "C3")
+            try:
+                logo = XLImage(str(logo_path))
+                logo.width = 180
+                logo.height = 60
+                ws.add_image(logo, "C3")
+            except ImportError:
+                pass
         wb.save(output_path)
         return output_path
     finally:
