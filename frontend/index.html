@@ -15,8 +15,6 @@
     <a href="#" data-module="chat" class="nav-item active" onclick="switchPanel(&apos;chat&apos;);return false"><span class="icon">Q</span>AI 对话</a>
     <a href="#" data-module="ota" class="nav-item" onclick="switchPanel(&apos;ota&apos;);return false"><span class="icon">O</span>OTA对账工作台</a>
     <a href="#" data-module="aging" class="nav-item" onclick="switchPanel(&apos;aging&apos;);return false"><span class="icon">A</span>账龄分析看板</a>
-    <a href="#" data-module="daily" class="nav-item" onclick="switchPanel(&apos;daily&apos;);return false"><span class="icon">D</span>每日核对工作台</a>
-    <a href="#" data-module="ar" class="nav-item" onclick="switchPanel(&apos;ar&apos;);return false"><span class="icon">R</span>每日应收处理</a>
     <a href="#" data-module="card" class="nav-item" onclick="switchPanel(&apos;card&apos;);return false"><span class="icon">C</span>信用卡审核面板</a>
     <a href="#" data-module="ctrip" class="nav-item" onclick="switchPanel(&apos;ctrip&apos;);return false"><span class="icon">X</span>携程佣金</a>
     <div class="nav-section">系统管理</div>
@@ -142,33 +140,6 @@
       <button class="btn-primary" onclick="runCorpRecon()">生成付款通知书</button>
     </div>
     <div class="wb-result" id="corpResult"></div>
-  </div>
-</section>
-
-<!-- Daily Check Panel -->
-<section id="panel-daily" class="panel">
-  <div class="panel-header"><h2>每日核对工作台</h2><span class="hint">上传OTA和信用卡对账结果Excel，汇总生成夜审报告</span></div>
-  <div class="workbench">
-    <div class="wb-steps">
-      <div class="step active"><span>1</span>上传对账结果</div>
-      <div class="step"><span>2</span>汇总核对</div>
-      <div class="step"><span>3</span>生成夜审报告</div>
-    </div>
-    <div class="wb-form">
-      <div class="form-group">
-        <label>OTA对账结果 (.xlsx)</label>
-        <input type="file" id="dailyOtaFile" accept=".xlsx,.xls" multiple onchange="updateDailyFileList('dailyOtaFile','dailyOtaFileList')">
-        <div class="file-list" id="dailyOtaFileList"></div>
-      </div>
-      <div class="form-group">
-        <label>信用卡对账结果 (.xlsx)</label>
-        <input type="file" id="dailyCardFile" accept=".xlsx,.xls" multiple onchange="updateDailyFileList('dailyCardFile','dailyCardFileList')">
-        <div class="file-list" id="dailyCardFileList"></div>
-      </div>
-      <button class="btn-primary" onclick="runDailyCheck()">开始汇总</button>
-      <button id="dailyCheckAutoBtn" class="btn-primary" onclick="runDailyCheckAuto()" style="margin-left:10px;">自动汇总（output目录）</button>
-    </div>
-    <div class="wb-result" id="dailyResult"></div>
   </div>
 </section>
 

@@ -356,14 +356,6 @@ CARD_MAPPING = {
     "card":   ["card", "卡号", "card_number", "card_no"],
 }
 
-NIGHT_AUDIT_MAPPING = {
-    "room":    ["room", "房号", "room_no"],
-    "account": ["account", "账号", "account_no"],
-    "date":    ["date", "日期", "业务日期", "biz_date"],
-    "amount":  ["amount", "金额", "挂账金额", "charge_amount"],
-}
-
-
 def read_ota_channel(path, channel_name, sheet_name=None):
     cfg = OTA_CHANNEL_MAPPINGS.get(channel_name)
     if not cfg:

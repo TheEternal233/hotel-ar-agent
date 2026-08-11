@@ -63,12 +63,6 @@ nav{flex:1;overflow-y:auto;padding:8px 0}
 .ac-label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
 .ac-value{display:block;font-size:22px;font-weight:700}
 
-/* AR Grid */
-.ar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
-.ar-card{padding:16px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s}
-.ar-card:hover{border-color:var(--primary);box-shadow:0 2px 8px rgba(37,99,235,.1)}
-.ar-card h3{font-size:14px;margin-bottom:4px}.ar-card p{font-size:12px;color:var(--muted)}
-
 /* Config Grid */
 .config-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 .config-card{padding:16px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;text-align:left;background:#fff;transition:all .2s;width:100%}
@@ -81,18 +75,11 @@ nav{flex:1;overflow-y:auto;padding:8px 0}
 .sched-card h3{font-size:14px;margin-bottom:6px}
 .sched-card p{font-size:12px;color:var(--muted);margin-bottom:12px}
 
-/* Daily Check - File List */
-.file-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.file-tag{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#f1f5f9;border:1px solid var(--border);border-radius:4px;font-size:12px}
-.file-tag .file-name{color:var(--text);font-weight:500}
-.file-tag .file-size{color:var(--muted);font-size:11px}
-
 @media(max-width:768px){
   #sidebar{width:50px;min-width:50px}
   .nav-item span:not(.icon),.logo h1,.nav-section,.version{display:none}
   .aging-cards{grid-template-columns:repeat(2,1fr)}
   .scheduler-grid,.config-grid{grid-template-columns:1fr}
-  .ar-grid{grid-template-columns:repeat(2,1fr)}
 }
 
 /* File Manager */

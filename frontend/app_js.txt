@@ -173,32 +173,6 @@
     btnEnable(btn, "Start Analysis");
   };
 
-  // ===== Daily Check =====
-  window.runDailyCheck = async function() {
-    var btn = document.querySelector("#panel-daily .btn-primary");
-    btnDisable(btn); showLoading("dailyResult");
-    try {
-      var night = await uploadAndGetPath("nightFile"), ar = await uploadAndGetPath("arLedgerFile");
-      if (!night || !ar) { setResult("dailyResult", "Error: Please upload both files"); btnEnable(btn, "Start Check"); return; }
-      var resp = await callChat("\u591c\u5ba1\u65e5\u62a5\u6838\u5bf9 \u591c\u5ba1:" + night + " \u53f0\u8d26:" + ar);
-      setResult("dailyResult", resp);
-    } catch(e) { setResult("dailyResult", "Error: " + e.message); }
-    btnEnable(btn, "Start Check");
-  };
-
-  // ===== Daily AR (with card feedback) =====
-  window.runDailyAr = async function(type) {
-    var label = type || "all";
-    var card = document.querySelector('#panel-ar .ar-card[onclick*="' + type + '"]');
-    if (card) { card.style.opacity = "0.5"; card.style.pointerEvents = "none"; }
-    showLoading("arResult");
-    try {
-      var resp = await callChat("\u6bcf\u65e5\u5e94\u6536\u5904\u7406 " + type);
-      setResult("arResult", type.toUpperCase() + " result:\n" + (resp || "Done"));
-    } catch(e) { setResult("arResult", "Error: " + e.message); }
-    if (card) { card.style.opacity = "1"; card.style.pointerEvents = "auto"; }
-  };
-
   // ===== Card Recon =====
   window.runCardRecon = async function() {
     var btn = document.querySelector("#panel-card .btn-primary");
