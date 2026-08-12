@@ -4,10 +4,12 @@
 （微信、支付宝、OTA卡、预付卡）分组。
 挂应收、挂房账、挂团队、OC、ENT、YFD 等付款方式不统计。
 """
+import logging
 
 from tools.doc_parser import read_sheet
 from tools.credit_card_recon.constants import normalize_payment
 
+logger=logging.getLogger(__name__)
 
 def _read_pms_report(path):
     """读取 PMS报表，按规范付款方式分组。
@@ -21,6 +23,7 @@ def _read_pms_report(path):
     """
     headers, rows = read_sheet(path)
     groups = {}
+    skipped_amt=0
     for r in rows:
         raw = r.get("付款代码", "")
         if isinstance(raw, (int, float)):
@@ -37,12 +40,19 @@ def _read_pms_report(path):
         try:
             amount = float(amt_val) if amt_val is not None else 0
         except (ValueError, TypeError):
+            skipped_amt+=1
+            logger.warning(
+                "PMS报表 金额解析失败，账单号=%s,原始金额值=%r",
+                r.get("账单号","?"),amt_val,
+            )
             continue
         groups.setdefault(method, []).append({
             "amount": amount,
             "bill_no": str(r.get("账单号", "")),
             "raw": r,
         })
+    if skipped_amt:
+        logger.warning("PMS报表 因金额解析失败跳过了 %d 条记录",skipped_amt)
     return groups
 
 
@@ -58,6 +68,7 @@ def _read_pos_statement(path):
     """
     headers, rows = read_sheet(path, header_row=3)
     groups = {}
+    skipped_amt=0
     for r in rows:
         pay_type = str(r.get("支付类型", "")).strip()
         tx_type = str(r.get("交易类型", "")).strip()
@@ -74,6 +85,14 @@ def _read_pos_statement(path):
             fee = float(r.get("手续费金额", 0) or 0)
             net = float(r.get("入账金额", 0) or 0)
         except (ValueError, TypeError):
+            skipped_amt+=1
+            logger.warning(
+                "POS流水 金额解析失败，支付类型=%s,客户实付=%r,手续费=%r,入账=%r",
+                pay_type,
+                r.get("客户实付金额"),
+                r.get("手续费金额"),
+                r.get("入账金额"),
+            )
             continue
         groups.setdefault(method, []).append({
             "amount": amount,
@@ -82,6 +101,8 @@ def _read_pos_statement(path):
             "tx_time": r.get("交易时间"),
             "raw": r,
         })
+    if skipped_amt:
+        logger.warning("POS流水 因金额解析失败错过了 %d 条记录",skipped_amt)
     return groups
 
 def _read_yfd_pms(path,channel_keyword):
@@ -99,6 +120,7 @@ def _read_yfd_pms(path,channel_keyword):
     """
     headers,rows=read_sheet(path,header_row=1)
     txs=[]
+    skipped_amt=0
     for r in rows:
         tx_type = str(r.get("类型", "")).strip()
         if tx_type !="借方":
@@ -114,13 +136,21 @@ def _read_yfd_pms(path,channel_keyword):
         try:
             amount = float(amt_val) if amt_val is not None else 0
         except (ValueError, TypeError):
+            skipped_amt+=1
+            logger.warning(
+                "YFD PMS(%s) 金额解析失败，账单号=%s,原始金额值=%r",
+                channel_keyword,
+                r.get("账单号","?"),
+                amt_val,
+            )
             continue
         txs.append({
             "amount": amount,
             "bill_no": str(r.get("账单号","")),
             "raw": r,
         })
-
+    if skipped_amt:
+        logger.warning("YFD PMS(%s) 因金额解析失败跳过了 %d 条记录",channel_keyword,skipped_amt)
     return txs
 
 
@@ -158,7 +188,18 @@ def _read_yfd_bank(path):
         elif "交易时间" in hs:
             tx_time_col=h
 
+    missing_cols=[]
+    if not amount_col:
+        missing_cols.append("金额")
+    if not net_col:
+        missing_cols.append("结算金额")
+    if missing_cols:
+        logger.warning(
+            "YFD银行流水 缺少关键列：%s,表头=%s",
+            ",".join(missing_cols),headers
+        )
     txs=[]
+    skipped_amt=0
     for r in rows:
         #只保留RD数据行
         if file_info_col:
@@ -175,6 +216,13 @@ def _read_yfd_bank(path):
             fee=float(r.get(fee_col,0)) if fee_col else 0
             net=float(r.get(net_col,0)) if net_col else 0
         except (ValueError, TypeError):
+            skipped_amt+=1
+            logger.warning(
+                "YFD银行流水 金额解析失败,金额=%r，佣金=%r，结算=%r",
+                r.get(amount_col) if amount_col else "N/A",
+                r.get(fee_col) if fee_col else "N/A",
+                r.get(net_col) if net_col else "N/A",
+            )
             continue
 
         txs.append({
@@ -184,5 +232,6 @@ def _read_yfd_bank(path):
             "tx_time":str(r.get(tx_time_col,"")) if tx_time_col else "",
             "raw": r,
         })
-
+    if skipped_amt:
+        logger.warning("YFD银行流水 因金额解析失败跳过了 %d 条记录", skipped_amt)
     return txs

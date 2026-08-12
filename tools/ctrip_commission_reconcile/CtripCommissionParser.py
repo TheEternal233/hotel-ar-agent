@@ -131,15 +131,3 @@ class CtripCommissionParser:
             return float(str(val).replace(",", "").replace("，",""))
         except (ValueError, TypeError):
             return 0.0
-
-
-if __name__ == "__main__":
-    parser = CtripCommissionParser()
-    rows = parser.parse("/mnt/agents/upload/携程佣金.xls")
-    print(f"共解析 {len(rows)} 条记录")
-    for r in rows[:5]:
-        print(r)
-
-
-
-

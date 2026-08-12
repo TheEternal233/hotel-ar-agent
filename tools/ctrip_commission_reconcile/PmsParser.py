@@ -134,10 +134,3 @@ class PmsParser:
         except (ValueError, TypeError):
             return default
 
-
-if __name__ == "__main__":
-    parser = PmsParser()
-    rows = parser.parse("pms_demo.xlsx")
-    print(f"共解析 {len(rows)} 条记录")
-    for r in rows[:5]:
-        print(r)

@@ -8,7 +8,7 @@
   → 输出对账差异表格
 挂应收、挂房账、挂团队、OC、ENT、YFD 等付款方式不统计。
 """
-import gc
+import logging
 import os
 from pathlib import Path
 
@@ -26,7 +26,7 @@ from tools.credit_card_recon.matcher import _reconcile_channel
 from tools.credit_card_recon.reporter import _generate_recon_report
 from tools.credit_card_recon.constants import RECON_PAYMENT_METHODS
 
-
+logger=logging.getLogger(__name__)
 def _classify_files(data_dir):
     """扫描目录，识别 PMS报表 与 POS机银行流水、YFD各渠道文件 文件
 
@@ -66,6 +66,7 @@ def _classify_files(data_dir):
 def _run_recon(pms_path, pos_path):
     """执行对账核心流程：解析 → 按 4 种付款方式对账 → 生成报告"""
     # 1) 读取 PMS报表 与 POS银行流水，按 4 种付款方式分组
+    logger.info("开始通用对账: PMS=%s, POS=%s", pms_path, pos_path)
     pms_groups = _read_pms_report(pms_path)
     pos_groups = _read_pos_statement(pos_path)
 
@@ -76,13 +77,18 @@ def _run_recon(pms_path, pos_path):
         pos_txs = pos_groups.get(method, [])
         # 只对至少一方有数据的付款方式生成对账结果
         if pms_txs or pos_txs:
-            recon_results.append(_reconcile_channel(method, pms_txs, pos_txs))
+            try:
+                result=_reconcile_channel(method,pms_txs,pos_txs)
+                recon_results.append(result)
+            except Exception:
+                logger.exception("渠道[%s]对账失败，已跳过", method)
 
     # 3) 输出对账差异表格
     return recon_results
 
 def _run_yfd_recon(pms_path, bank_path,channel_name,channel_keyword):
     """执行 YFD 单渠道对账：解析->服用通用匹配逻辑->返回单条结果"""
+    logger.info("开始YFD对账: channel=%s, PMS=%s, Bank=%s", channel_name, pms_path, bank_path)
     pms_txs = _read_yfd_pms(pms_path,channel_keyword)
     bank_txs=_read_yfd_bank(bank_path)
     return _reconcile_channel(channel_name, pms_txs, bank_txs)
@@ -96,32 +102,51 @@ def batch_card_recon(data_dir=None):
         return f"错误：数据目录不存在: {data_dir}"
     files=_classify_files(data_dir)
     all_results=[]
+    errors=[]
 
-    #通用对账
+    # 通用对账
     if files["pms_report"] and files["pos"]:
-        all_results.extend(_run_recon(
-            os.path.join(data_dir, files["pms_report"]),
-            os.path.join(data_dir, files["pos"])
-        ))
+        try:
+            all_results.extend(_run_recon(
+                os.path.join(data_dir, files["pms_report"]),
+                os.path.join(data_dir, files["pos"])
+            ))
+        except Exception:
+            logger.exception("通用PMS/POS对账失败")
+            errors.append("通用PMS/POS对账失败")
+
     # YFD ALIPAY独立对账
     if files["yfd_alipay_pms"] and files["yfd_alipay_bank"]:
-        all_results.append(_run_yfd_recon(
-            os.path.join(data_dir, files["yfd_alipay_pms"]),
-            os.path.join(data_dir, files["yfd_alipay_bank"]),
-            "YFD支付宝","YFD 支付宝"
-        ))
+        try:
+            all_results.append(_run_yfd_recon(
+                os.path.join(data_dir, files["yfd_alipay_pms"]),
+                os.path.join(data_dir, files["yfd_alipay_bank"]),
+                "YFD支付宝", "YFD 支付宝"
+            ))
+        except Exception:
+            logger.exception("YFD支付宝对账失败")
+            errors.append("YFD支付宝对账失败")
+
     # YFD WECHAT 独立对账
     if files["yfd_wechat_pms"] and files["yfd_wechat_bank"]:
-        all_results.append(_run_yfd_recon(
-            os.path.join(data_dir, files["yfd_wechat_pms"]),
-            os.path.join(data_dir, files["yfd_wechat_bank"]),
-            "YFD微信", "YFD 微信"
-        ))
+        try:
+            all_results.append(_run_yfd_recon(
+                os.path.join(data_dir, files["yfd_wechat_pms"]),
+                os.path.join(data_dir, files["yfd_wechat_bank"]),
+                "YFD微信", "YFD 微信"
+            ))
+        except Exception:
+            logger.exception("YFD微信对账失败")
+            errors.append("YFD微信对账失败")
 
     if not all_results:
-        return "错误：未找到任何可对账的文件组合（通用 PMS/POS 或 YFD 文件对）"
+        err_detail = "；".join(errors) if errors else "未找到任何可对账的文件组合"
+        return f"错误：{err_detail}"
 
-    return _generate_recon_report(all_results)
+    result = _generate_recon_report(all_results)
+    if errors:
+        result += f"\n\n警告：以下渠道对账失败 — {'; '.join(errors)}"
+    return result
 
 
 
@@ -163,25 +188,25 @@ def credit_card_recon(bank_statement_path: str = "", pms_card_path: str = "") ->
         result=_generate_recon_report(recon_results)
 
 
-    # 强制垃圾回收，释放Excel文件句柄
-    gc.collect()
-    # 清理上传文件：直接删除，不做路径前缀检查
-    base = Path(BASE_DIR).resolve()
-    for p in (bank_statement_path, pms_card_path):
-        try:
-            if p:
-                fp = Path(p).resolve()
-                try:
-                    fp.relative_to(base)
-                    if fp.exists():
-
-                        os.remove(p)
-                except ValueError:
-                    pass
-        except OSError:
-            pass
+    # 清理上传文件（仅限项目目录内的文件，防止误删）
+    _cleanup_temp_files(bank_statement_path, pms_card_path)
     return result
 
 
-if __name__ == "__main__":
-    print(batch_card_recon())
+def _cleanup_temp_files(*paths):
+    """安全清理临时文件：仅删除 BASE_DIR 子目录下的文件"""
+    base = Path(BASE_DIR).resolve()
+    for p in paths:
+        if not p:
+            continue
+        try:
+            fp = Path(p).resolve()
+            try:
+                fp.relative_to(base)
+            except ValueError:
+                continue
+            if fp.exists():
+                os.remove(p)
+                logger.info("已清理临时文件: %s", p)
+        except OSError:
+            logger.warning("清理临时文件失败: %s", p)

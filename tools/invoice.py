@@ -6,9 +6,9 @@ from langchain.tools import tool
 import openpyxl
 from openpyxl.styles import Font
 
-from tools.doc_parser import read_rezen, read_sheet
+from tools.doc_parser import read_rezen
 from enums.common_enum import HEADER_FILL, HEADER_FONT, THIN_BORDER, YELLOW_FILL
-from enums.paths import BASE_DIR, OUTPUT_DIR as OUT_DIR
+from enums.paths import OUTPUT_DIR as OUT_DIR
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -115,12 +115,3 @@ def invoice_gen(receivable_path: str, invoice_type: str = "普通发票") -> str
     )
 
 
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1:
-        print(invoice_gen.invoke({"receivable_path": sys.argv[1]}))
-    else:
-        data_dir = os.path.join(BASE_DIR, "data", "清远", "协议企业对账")
-        files = [f for f in os.listdir(data_dir) if f.endswith(".xlsx")]
-        if files:
-            print(invoice_gen.invoke({"receivable_path": os.path.join(data_dir, files[0])}))

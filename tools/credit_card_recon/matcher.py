@@ -5,12 +5,20 @@
 2. 金额对比 —— 对比 PMS 与 POS 的金额合计，相同则对平，不同则计算差额；
 3. 逐笔配对 —— 同金额分组配对，找出未匹配明细供差异表展示。
 """
-
+import logging
 from collections import defaultdict
 
 from tools.credit_card_recon.constants import AMOUNT_TOLERANCE
 
-
+logger=logging.getLogger(__name__)
+def _safe_amount(tx):
+    """安全获取交易金额，非数字类型返回 None 并告警"""
+    raw=tx.get("amount")
+    try:
+        return float(raw) if raw is not None else 0.0
+    except (ValueError, TypeError):
+        logger.warning("对账匹配时遇到非数字金额: %r, 账单号=%s", raw, tx.get("bill_no", "?"))
+        return None
 def _match_by_amount(pms_txs, bank_txs):
     """同金额分组配对：先按金额分组，同金额多笔按顺序配对。
 
@@ -20,7 +28,10 @@ def _match_by_amount(pms_txs, bank_txs):
     def group_by_amount(txs):
         groups = defaultdict(list)
         for t in txs:
-            key = int(round(float(t.get("amount", 0)) * 100))
+            amt=_safe_amount(t)
+            if amt is None:
+                continue
+            key = int(round(amt*100))
             groups[key].append(t)
         return groups
 
@@ -65,15 +76,18 @@ def _reconcile_channel(channel, pms_txs, bank_txs):
               pms_total, bank_total, diff, amount_match, balanced,
               matched, unmatched_pms, unmatched_bank
     """
+    if not pms_txs and not bank_txs:
+        logger.info("渠道[%s] PMS与POS均无数据，跳过对账", channel)
+
     # 1) 数量（交易笔数）
     pms_count = len(pms_txs)
     bank_count = len(bank_txs)
     count_match = pms_count == bank_count
 
     # 2) 金额合计
-    pms_total = round(sum(t.get("amount", 0) for t in pms_txs), 2)
-    bank_total = round(sum(t.get("amount", 0) for t in bank_txs), 2)
-    bank_fees = round(sum(t.get("fee", 0) for t in bank_txs), 2)
+    pms_total = round(sum(_safe_amount(t) or 0 for t in pms_txs), 2)
+    bank_total = round(sum(_safe_amount(t) or 0 for t in bank_txs), 2)
+    bank_fees = round(sum(t.get("fee", 0) for t in bank_txs if isinstance(t.get("fee"),(int,float))), 2)
 
     # 3) 金额差额（PMS - POS），相同则对平
     diff = round(pms_total - bank_total, 2)
