@@ -102,7 +102,7 @@ def _read_pos_statement(path):
             "raw": r,
         })
     if skipped_amt:
-        logger.warning("POS流水 因金额解析失败错过了 %d 条记录",skipped_amt)
+        logger.warning("POS流水 因金额解析失败跳过了 %d 条记录",skipped_amt)
     return groups
 
 def _read_yfd_pms(path,channel_keyword):

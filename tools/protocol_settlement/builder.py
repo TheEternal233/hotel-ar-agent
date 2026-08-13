@@ -1,5 +1,5 @@
 """付款通知书 — 数据构建与模板填充"""
-
+import logging
 import os
 import shutil
 from datetime import datetime, timedelta
@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl import load_workbook
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
 
 from .config import (
     TemplateRows, DetailCols, DEFAULT_ADJUSTMENT, DEFAULT_DUE_DAYS,
@@ -17,17 +18,24 @@ from .utils import (
     insert_rows_with_style, update_sum_formula,
 )
 
-
+logger = logging.getLogger(__name__)
 def filter_records_by_month(records, month_start: datetime, month_end: datetime):
     """筛选指定月份的借方记录"""
     filtered = []
     for rec in records:
-        if not rec.get("effective_corp") or rec.get("type") != "借方":
+        if not rec.get("effective_corp"):
             continue
         if not is_in_month(rec.get("date"), month_start, month_end):
             continue
-        amt = rec.get("debit", 0) or rec.get("amount", 0)
-        if amt > 0:
+        if rec.get("type")=="借方":
+            amt = rec.get("debit", 0) or rec.get("amount", 0)
+        elif rec.get("type")=="贷方":
+            amt = -(rec.get("credit", 0) or rec.get("amount", 0))
+        else:
+            continue;
+
+        if amt != 0:
+            rec["notice_amount"]=round(amt, 2)
             filtered.append(rec)
     return filtered
 
@@ -48,11 +56,15 @@ def build_corp_summary(records, month_start: datetime, month_end: datetime,
 
         details = []
         for rec in sorted(corp_records, key=lambda r: r.get("date") or datetime.min):
+            is_credit=rec.get("type")=="贷方"
             details.append({
                 "date": rec.get("date"),
-                "conf_no": rec.get("ext_order") or rec.get("order_no") or rec.get("bill_no", ""),
-                "guest_name": rec.get("name_desc", ""),
-                "amount": round(rec.get("debit", 0) or rec.get("amount", 0), 2),
+                # 贷方没有预订号，留空
+                "conf_no": "" if is_credit else (rec.get("ext_order") or rec.get("order_no") or rec.get("bill_no", "")),
+                # 贷方显示"本期回款"，不塞客人名字
+                "guest_name": "本期回款" if is_credit else rec.get("name_desc", ""),
+                # 直接用前面算好的金额（贷方已是负数）
+                "amount": rec["notice_amount"],
             })
 
         detail_total = round(sum(d["amount"] for d in details), 2)
@@ -140,12 +152,30 @@ def fill_notice_template(corp_name: str, data: Dict[str, Any],
         logo_path = Path(__file__).parent / "logo.png"
         if logo_path.exists():
             try:
+                from PIL import Image as PILImage
+                from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+                from openpyxl.drawing.xdr import XDRPositiveSize2D
+
+                img = PILImage.open(str(logo_path))
+                ratio = 220 / img.width
+                display_h = int(img.height * ratio)
+
                 logo = XLImage(str(logo_path))
-                logo.width = 180
-                logo.height = 60
-                ws.add_image(logo, "C3")
+                logo.width = 220
+                logo.height = display_h
+
+                anchor = OneCellAnchor()
+                anchor._from = AnchorMarker(col=2, row=1, colOff=1000000, rowOff=0)
+                anchor.ext = XDRPositiveSize2D(cx=220 * 9525, cy=display_h * 9525)
+                logo.anchor = anchor
+                ws.add_image(logo)
             except ImportError:
-                pass
+                logger.warning("缺少 Pillow 库，无法插入 logo。请执行: pip install Pillow")
+            except Exception:
+                logger.exception("插入 logo 图片失败")
+
+
+
         wb.save(output_path)
         return output_path
     finally:
