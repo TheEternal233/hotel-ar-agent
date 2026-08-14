@@ -259,24 +259,43 @@
     if (card) { card.style.opacity = "1"; card.style.pointerEvents = "auto"; }
   };
 
-  // ===== Scheduler (专用端点) =====
-  window.scheduleRun = async function(mode) {
-    var btn = document.querySelector('#panel-scheduler .sched-card button[onclick*="' + mode + '"]');
-    if (btn) btnDisable(btn, "执行中...");
-    try {
-      var resp = await apiPost("/scheduler/" + mode, {});
+    // ===== Scheduler (智能调度) =====
+    window.scheduleRun = async function(mode) {
+      var btn = document.querySelector('#panel-scheduler .sched-card button[onclick*="' + mode + '"]');
+      if (btn) btnDisable(btn, "执行中...");
+
       var resultEl = document.getElementById("schedulerResult");
-      if (resultEl && resp.ok) {
-        resultEl.textContent = resp.results ? resp.results.join("\n\n") : "无结果";
-      } else if (resultEl) {
-        resultEl.textContent = "错误：" + (resp.detail || "未知");
+      resultEl.innerHTML = '<div class="sched-loading">正在智能调度，自动发现任务并执行...</div>';
+
+      try {
+        var resp = await apiPost("/scheduler/" + mode, {});
+
+        if (resp.ok && resp.results) {
+          var html = '<div class="sched-summary">';
+          html += '<div class="sched-stat">总任务: ' + (resp.summary?.total || 0) + '</div>';
+          html += '<div class="sched-stat success">成功: ' + (resp.summary?.success || 0) + '</div>';
+          html += '<div class="sched-stat error">失败: ' + (resp.summary?.failed || 0) + '</div>';
+          html += '</div>';
+
+          html += '<div class="sched-timeline">';
+          for (var i = 0; i < resp.results.length; i++) {
+            var r = resp.results[i];
+            var isErr = r.indexOf("❌") !== -1;
+            html += '<div class="sched-item ' + (isErr ? 'error' : 'success') + '">';
+            html += '<div class="sched-text">' + r.replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</div>';
+            html += '</div>';
+          }
+          html += '</div>';
+          resultEl.innerHTML = html;
+        } else {
+          resultEl.textContent = "错误：" + (resp.detail || "未知");
+        }
+      } catch(e) {
+        resultEl.textContent = "错误：" + e.message;
       }
-    } catch(e) {
-      var resultEl = document.getElementById("schedulerResult");
-      if (resultEl) resultEl.textContent = "错误：" + e.message;
-    }
-    if (btn) btnEnable(btn, mode === "daily" ? "执行日清" : "执行月度");
-  };
+
+      if (btn) btnEnable(btn, mode === "daily" ? "执行日清" : "执行月度");
+    };
 
   window.viewApprovals = function() {
     addMsg("system", "[审批] 审批队列将在部署时配置");
