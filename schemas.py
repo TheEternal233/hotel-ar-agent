@@ -56,3 +56,13 @@ class FileListResponse(BaseModel):
 
 class FileDeleteRequest(BaseModel):
     path: str
+
+class CardReconRequest(BaseModel):
+    bank_statement_path: str
+    pms_card_path: str
+
+class CardReconConfirmRequest(BaseModel):
+    bank_statement_path: str
+    pms_card_path: str
+    review_items: list=[]
+    comments: str=""

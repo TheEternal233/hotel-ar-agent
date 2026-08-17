@@ -214,16 +214,129 @@
   };
 
   // ===== Card Recon (专用端点) =====
-  window.runCardRecon = async function() {
-    var btn = document.querySelector("#panel-card .btn-primary");
-    btnDisable(btn); showLoading("cardResult");
+  window._cardState = { bankPath: "", pmsPath: "", unmatched: [] };
+
+  window.updateCardPath = function(inputId, hintId) {
+    var f = document.getElementById(inputId).files[0];
+    document.getElementById(hintId).textContent = f ? f.name : "";
+  };
+
+  window.runCardPreview = async function() {
+    var btn = document.getElementById("cardPreviewBtn");
+    btnDisable(btn, "对账中...");
+    setResult("cardResult", "");
     try {
-      var bank = await uploadAndGetPath("bankFile"), pms = await uploadAndGetPath("pmsCardFile");
-      if (!bank || !pms) { setResult("cardResult", "错误：请上传两个文件"); btnEnable(btn, "开始对账"); return; }
-      var resp = await apiPost("/card/recon", { bank_statement_path: bank, pms_card_path: pms });
-      setResult("cardResult", resp.ok ? resp.result : ("错误：" + (resp.detail || "未知")));
-    } catch(e) { setResult("cardResult", "错误：" + e.message); }
+      var bank = await uploadAndGetPath("bankFile");
+      var pms = await uploadAndGetPath("pmsCardFile");
+      if (!bank || !pms) {
+        setResult("cardResult", "错误：请上传两个文件");
+        btnEnable(btn, "开始对账");
+        return;
+      }
+      window._cardState.bankPath = bank;
+      window._cardState.pmsPath = pms;
+
+      var resp = await apiPost("/card/recon_preview", { bank_statement_path: bank, pms_card_path: pms });
+      if (!resp.ok) {
+        setResult("cardResult", "错误：" + (resp.detail || "未知"));
+        btnEnable(btn, "开始对账");
+        return;
+      }
+
+      renderCardPreview(resp.summary, resp.unmatched_details);
+      document.getElementById("cardStep1").style.display = "none";
+      document.getElementById("cardStep2").style.display = "block";
+    } catch(e) {
+      setResult("cardResult", "错误：" + e.message);
+    }
     btnEnable(btn, "开始对账");
+  };
+
+  function renderCardPreview(summary, unmatched) {
+    window._cardState.unmatched = unmatched || [];
+
+    var summaryHtml = '<h3>对账汇总</h3><table class="card-table">' +
+      '<thead><tr><th>付款方式</th><th>PMS数量</th><th>POS数量</th><th>PMS金额</th><th>POS金额</th><th>差额</th><th>状态</th></tr></thead><tbody>';
+    for (var i = 0; i < summary.length; i++) {
+      var s = summary[i];
+      var statusClass = s.balanced ? "status-ok" : "status-diff";
+      var statusText = s.balanced ? "对平" : "差异";
+      summaryHtml += '<tr>' +
+        '<td>' + s.channel + '</td>' +
+        '<td>' + s.pms_count + '</td>' +
+        '<td>' + s.bank_count + '</td>' +
+        '<td>' + s.pms_total.toFixed(2) + '</td>' +
+        '<td>' + s.bank_total.toFixed(2) + '</td>' +
+        '<td>' + s.diff.toFixed(2) + '</td>' +
+        '<td class="' + statusClass + '">' + statusText + '</td>' +
+        '</tr>';
+    }
+    summaryHtml += '</tbody></table>';
+    document.getElementById("cardSummary").innerHTML = summaryHtml;
+
+    var listHtml = '';
+    if (unmatched && unmatched.length > 0) {
+      listHtml += '<table class="card-table">' +
+        '<thead><tr><th>核实</th><th>付款方式</th><th>来源</th><th>差异类型</th><th>金额</th><th>原始数据</th></tr></thead><tbody>';
+      for (var j = 0; j < unmatched.length; j++) {
+        var u = unmatched[j];
+        var rawStr = JSON.stringify(u.raw).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        listHtml += '<tr>' +
+          '<td><input type="checkbox" class="card-check" data-id="' + u.id + '" checked></td>' +
+          '<td>' + u.channel + '</td>' +
+          '<td>' + u.source + '</td>' +
+          '<td>' + u.type + '</td>' +
+          '<td>' + (u.amount ? u.amount.toFixed(2) : "0.00") + '</td>' +
+          '<td class="raw-cell" title="' + rawStr + '">' + rawStr + '</td>' +
+          '</tr>';
+      }
+      listHtml += '</tbody></table>';
+    } else {
+      listHtml = '<div class="card-empty">无差异明细，所有款项已对平</div>';
+    }
+    document.getElementById("cardUnmatchedList").innerHTML = listHtml;
+    document.getElementById("cardComment").value = "";
+  }
+
+  window.cardBackToUpload = function() {
+    document.getElementById("cardStep1").style.display = "block";
+    document.getElementById("cardStep2").style.display = "none";
+    setResult("cardResult", "");
+  };
+
+  window.runCardConfirm = async function() {
+    var btn = document.getElementById("cardConfirmBtn");
+    btnDisable(btn, "生成中...");
+    try {
+      var checks = document.querySelectorAll(".card-check");
+      var reviewItems = [];
+      for (var i = 0; i < checks.length; i++) {
+        if (checks[i].checked) {
+          reviewItems.push(checks[i].dataset.id);
+        }
+      }
+      var comment = document.getElementById("cardComment").value.trim();
+      var resp = await apiPost("/card/recon_confirm", {
+        bank_statement_path: window._cardState.bankPath,
+        pms_card_path: window._cardState.pmsPath,
+        review_items: reviewItems,
+        comments: comment
+      });
+      if (resp.ok) {
+        setResult("cardResult", "审核完成\n已核实项: " + resp.reviewed_count + "\n批注: " + (resp.comments || "无") + "\n\n" + resp.result);
+        document.getElementById("cardStep2").style.display = "none";
+        document.getElementById("cardStep1").style.display = "block";
+        document.getElementById("bankFile").value = "";
+        document.getElementById("pmsCardFile").value = "";
+        document.getElementById("bankPathHint").textContent = "";
+        document.getElementById("pmsCardPathHint").textContent = "";
+      } else {
+        setResult("cardResult", "错误：" + (resp.detail || "未知"));
+      }
+    } catch(e) {
+      setResult("cardResult", "错误：" + e.message);
+    }
+    btnEnable(btn, "确认并生成报告");
   };
 
   // ===== Ctrip (专用端点) =====

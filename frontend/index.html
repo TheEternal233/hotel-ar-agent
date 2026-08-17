@@ -96,11 +96,33 @@
 <section id="panel-card" class="panel">
   <div class="panel-header"><h2>信用卡对账审核面板</h2></div>
   <div class="workbench">
-    <div class="wb-form">
-      <div class="form-group"><label>银行对账单 (.xlsx)</label><input type="file" id="bankFile" accept=".xlsx,.xls"></div>
-      <div class="form-group"><label>PMS信用卡收款记录 (.xlsx)</label><input type="file" id="pmsCardFile" accept=".xlsx,.xls"></div>
-      <button class="btn-primary" onclick="runCardRecon()">开始对账</button>
+    <!-- 步骤1: 上传文件 -->
+    <div id="cardStep1">
+      <div class="wb-form">
+        <div class="form-group"><label>银行对账单 (.xlsx)</label><input type="file" id="bankFile" accept=".xlsx,.xls" onchange="updateCardPath('bankFile','bankPathHint')"><span class="path-hint" id="bankPathHint"></span></div>
+        <div class="form-group"><label>PMS信用卡收款记录 (.xlsx)</label><input type="file" id="pmsCardFile" accept=".xlsx,.xls" onchange="updateCardPath('pmsCardFile','pmsCardPathHint')"><span class="path-hint" id="pmsCardPathHint"></span></div>
+        <button class="btn-primary" id="cardPreviewBtn" onclick="runCardPreview()">开始对账</button>
+      </div>
     </div>
+
+    <!-- 步骤2: 对账结果预览 + 人工审核 -->
+    <div id="cardStep2" style="display:none">
+      <div class="card-summary" id="cardSummary"></div>
+      <div class="card-detail-section">
+        <h3>差异明细 <span class="hint">请勾选已核实项，可添加批注</span></h3>
+        <div id="cardUnmatchedList"></div>
+      </div>
+      <div class="card-comment-section">
+        <label>审核批注</label>
+        <textarea id="cardComment" rows="3" placeholder="输入整体审核意见..."></textarea>
+      </div>
+      <div class="card-actions">
+        <button class="btn-sm" onclick="cardBackToUpload()">返回重新上传</button>
+        <button class="btn-primary" id="cardConfirmBtn" onclick="runCardConfirm()">确认并生成报告</button>
+      </div>
+    </div>
+
+    <!-- 步骤3: 生成结果 -->
     <div class="wb-result" id="cardResult"></div>
   </div>
 </section>
