@@ -300,6 +300,108 @@
   window.viewApprovals = function() {
     addMsg("system", "[审批] 审批队列将在部署时配置");
   };
+
+  // ===== Drag & Drop Upload with Validation =====
+  (function initDropZone() {
+    var dz = document.getElementById("dropZone");
+    var fi = document.getElementById("dropFileInput");
+    if (!dz) return;
+
+    dz.addEventListener("dragover", function(e) {
+      e.preventDefault();
+      dz.classList.add("dragover");
+    });
+    dz.addEventListener("dragleave", function(e) {
+      e.preventDefault();
+      dz.classList.remove("dragover");
+    });
+    dz.addEventListener("drop", function(e) {
+      e.preventDefault();
+      dz.classList.remove("dragover");
+      var files = e.dataTransfer.files;
+      if (files.length) processDropFiles(files);
+    });
+  })();
+
+  window.handleDropUpload = function(e) {
+    if (e.target.files.length) processDropFiles(e.target.files);
+    e.target.value = "";
+  };
+
+  async function processDropFiles(files) {
+    var area = document.getElementById("uploadPreviewArea");
+    var container = document.getElementById("uploadResults");
+    area.style.display = "block";
+
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var cardId = "ur-" + Date.now() + "-" + i;
+      var card = createResultCard(cardId, f.name, "自动检测中...", "pending");
+      container.appendChild(card);
+
+      var fd = new FormData();
+      fd.append("file", f);
+
+      try {
+        var r = await fetch(API + "/files/validate", {
+          method: "POST",
+          body: fd
+        });
+        var d = await r.json();
+        updateResultCard(cardId, d);
+      } catch (err) {
+        updateResultCard(cardId, { valid: false, error: "网络错误: " + err.message });
+      }
+    }
+  }
+
+  function createResultCard(id, name, meta, status) {
+    var div = document.createElement("div");
+    div.id = id;
+    div.className = "upload-result-card " + status;
+    div.innerHTML =
+      '<div class="ur-icon">📄</div>' +
+      '<div class="ur-body">' +
+        '<div class="ur-name">' + name + '</div>' +
+        '<div class="ur-meta">' + meta + '</div>' +
+        '<div class="ur-detail"></div>' +
+      '</div>';
+    return div;
+  }
+
+  function updateResultCard(id, d) {
+    var card = document.getElementById(id);
+    if (!card) return;
+    var body = card.querySelector(".ur-body");
+
+    if (d.valid) {
+      card.className = "upload-result-card success";
+      var preview = "";
+      if (d.preview) {
+        preview = "工作表: " + (d.preview.sheet || "-") +
+                  " | 列数: " + d.preview.cols +
+                  " | 行数: " + d.preview.rows +
+                  "\n表头: " + (d.preview.headers || []).join(", ");
+      }
+      body.innerHTML =
+        '<div class="ur-name">' + d.filename + '</div>' +
+        '<div class="ur-meta">' + (d.file_kind || "未知类型") +
+        ' | ' + (d.size / 1024).toFixed(1) + ' KB</div>' +
+        '<div class="ur-preview">' + preview + '</div>' +
+        '<div class="ur-actions">' +
+          '<a class="btn-xs" href="' + (d.download_url || ("/api/download?path=" + encodeURIComponent(d.path))) + '" download>下载</a>' +
+          '<button class="btn-xs btn-danger" onclick="deleteFile(\'' + d.path.replace(/\\/g, "\\\\") + '\', \'uploads\')">删除</button>' +
+        '</div>';
+    } else {
+      card.className = "upload-result-card error";
+      body.innerHTML =
+        '<div class="ur-name">' + (d.filename || "未知文件") + '</div>' +
+        '<div class="ur-error">❌ ' + (d.error || "校验失败") + '</div>' +
+        '<div class="ur-actions">' +
+          '<button class="btn-xs btn-danger" onclick="deleteFile(\'' + (d.path || "").replace(/\\/g, "\\\\") + '\', \'uploads\')">删除</button>' +
+        '</div>';
+    }
+  }
     // ===== File Manager =====
   window._fileMgrState = window._fileMgrState || {};
 

@@ -196,16 +196,38 @@
   </div>
 </section>
 
-<!-- Uploads File Manager -->
+<!-- Uploads File Manager —— 拖拽上传 + 自动检测格式 + 预览 -->
 <section id="panel-uploads" class="panel">
-  <div class="panel-header"><h2>上传文件管理</h2><span class="hint">查看、下载或清理 uploads 目录下的文件</span></div>
+  <div class="panel-header"><h2>文件上传中心</h2><span class="hint">拖拽 PMS / OTA / 应收 / 信用卡 / 携程 文件到下方区域，自动检查格式并预览</span></div>
   <div class="workbench">
-    <div class="filemgr-toolbar">
-      <button class="btn-primary" onclick="loadFileList('uploads')">刷新</button>
-      <button class="btn-sm" onclick="cleanupDir('uploads')">清空全部</button>
+    <!-- 拖拽上传区 -->
+    <div id="dropZone" class="drop-zone">
+      <div class="drop-zone-inner">
+        <div class="drop-icon">📁</div>
+        <div class="drop-text">拖拽文件到此处，或 <span class="drop-link" onclick="document.getElementById('dropFileInput').click()">点击选择</span></div>
+        <div class="drop-hint">支持 .xlsx / .xls，自动识别格式</div>
+      </div>
+      <input type="file" id="dropFileInput" multiple accept=".xlsx,.xls" hidden onchange="handleDropUpload(event)">
     </div>
-    <div class="filemgr-list" id="uploadsList">
-      <div class="filemgr-empty">点击「刷新」加载文件列表</div>
+
+    <!-- 上传结果 / 预览区 -->
+    <div id="uploadPreviewArea" class="upload-preview-area" style="display:none">
+      <h3>上传结果</h3>
+      <div id="uploadResults"></div>
+    </div>
+
+    <!-- 文件列表管理 -->
+    <div class="filemgr-section">
+      <div class="filemgr-toolbar">
+        <h3>已上传文件</h3>
+        <div>
+          <button class="btn-primary" onclick="loadFileList('uploads')">刷新</button>
+          <button class="btn-sm" onclick="cleanupDir('uploads')">清空全部</button>
+        </div>
+      </div>
+      <div class="filemgr-list" id="uploadsList">
+        <div class="filemgr-empty">点击「刷新」加载文件列表</div>
+      </div>
     </div>
   </div>
 </section>

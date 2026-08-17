@@ -85,18 +85,51 @@ class TaskEngine:
         """执行单个任务"""
         task = self.tasks[name]
         start = datetime.now()
-        try:
-            if asyncio.iscoroutinefunction(task.func):
-                output = await task.func()
-            else:
-                loop = asyncio.get_event_loop()
-                output = await loop.run_in_executor(None, task.func)
-            duration = int((datetime.now() - start).total_seconds() * 1000)
-            return TaskResult(name=name, success=True, output=str(output), duration_ms=duration)
-        except Exception as e:
-            duration = int((datetime.now() - start).total_seconds() * 1000)
-            logger.exception(f"任务 {name} 执行失败")
-            return TaskResult(name=name, success=False, error=str(e), duration_ms=duration)
+        last_error=""
+
+        # 循环执行，初始1次+重试retries次
+        for attempt in range(task.retries+1):
+            try:
+                # 执行任务，带超时控制
+                if asyncio.iscoroutinefunction(task.func):
+                    if task.timeout>0:
+                        output=await asyncio.wait_for(task.func(), timeout=task.timeout)
+                    else:
+                        output=task.func()
+                else:
+                    loop=asyncio.get_event_loop()
+                    if task.timeout>0:
+                        output=await asyncio.wait_for(loop.run_in_executor(None, task.func), timeout=task.timeout)
+                    else:
+                        output=await loop.run_in_executor(None,task.func)
+
+                # 成功，返回结果
+                duration=int((datetime.now() - start).total_seconds() * 1000)
+                retry_info=f"(重试{attempt}次后成功)" if attempt>0 else ""
+                return TaskResult(name=name, success=True, output=str(output)+retry_info,duration_ms=duration)
+
+            except asyncio.TimeoutError:
+                # 超时，记录错误，等待后重试
+                last_error=last_error = f"第{attempt + 1}次执行超时（>{task.timeout}秒）"
+                logger.warning(f"任务 {name} {last_error}")
+                if attempt<task.retries:
+                    await asyncio.sleep(1*(attempt+1))
+            except Exception as e:
+                # 异常，记录错误，等待后重试
+                last_error=str(e)
+                logger.exception(f"任务 {name} 第{attempt + 1}次执行失败")
+                if attempt < task.retries:
+                    await asyncio.sleep(1 * (attempt + 1))
+
+        # 全部重试用完：返回失败
+        duration = int((datetime.now() - start).total_seconds() * 1000)
+        return TaskResult(
+            name=name, success=False,
+            error=f"{last_error}（已重试{task.retries}次，全部失败）",
+            duration_ms=duration
+        )
+
+
 
     async def run(self) -> list[TaskResult]:
         """完整调度流程：发现 → 排序 → 并行执行"""

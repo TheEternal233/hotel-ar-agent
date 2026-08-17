@@ -114,3 +114,34 @@ nav{flex:1;overflow-y:auto;padding:8px 0}
 .sched-item.error { border-left-color: #f44336; background: #ffebee; }
 .sched-text { font-family: monospace; font-size: 13px; white-space: pre-wrap; }
 .sched-loading { color: #666; padding: 20px; text-align: center; }
+
+/* ===== 拖拽上传区 ===== */
+.upload-type-bar{display:flex;align-items:center;gap:8px;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:var(--radius);border:1px solid var(--border)}
+.upload-type-bar label{font-size:13px;font-weight:500}
+.upload-type-bar select{padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:13px;background:#fff}
+.drop-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:40px 20px;text-align:center;background:#fafbfc;transition:all .2s;cursor:pointer;margin-bottom:20px}
+.drop-zone.dragover{border-color:var(--primary);background:#eff6ff}
+.drop-zone-inner{pointer-events:none}
+.drop-icon{font-size:40px;margin-bottom:8px}
+.drop-text{font-size:14px;color:var(--text);margin-bottom:4px}
+.drop-link{color:var(--primary);text-decoration:underline;cursor:pointer;pointer-events:auto}
+.drop-hint{font-size:12px;color:var(--muted)}
+
+/* ===== 上传结果预览 ===== */
+.upload-preview-area{margin-bottom:20px}
+.upload-preview-area h3{font-size:14px;margin-bottom:10px;color:var(--text)}
+.upload-result-card{display:flex;align-items:flex-start;gap:12px;padding:12px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:8px;background:#fff}
+.upload-result-card.success{border-left:4px solid var(--success)}
+.upload-result-card.error{border-left:4px solid var(--danger)}
+.upload-result-card.pending{border-left:4px solid var(--muted)}
+.ur-icon{font-size:24px}
+.ur-body{flex:1}
+.ur-name{font-weight:600;font-size:13px;margin-bottom:2px}
+.ur-meta{font-size:12px;color:var(--muted);margin-bottom:4px}
+.ur-preview{background:#f8fafc;border-radius:4px;padding:8px;font-size:12px;font-family:monospace;white-space:pre-wrap;max-height:120px;overflow-y:auto}
+.ur-error{color:var(--danger);font-size:12px}
+.ur-actions{display:flex;gap:6px;margin-top:6px}
+
+/* 文件管理分段标题 */
+.filemgr-section{border-top:1px solid var(--border);padding-top:16px}
+.filemgr-section .filemgr-toolbar h3{font-size:14px;margin:0}

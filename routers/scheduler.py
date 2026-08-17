@@ -16,22 +16,24 @@ def _build_engine(mode: str) -> TaskEngine:
 
     if mode == "daily":
         # 日清：信用卡对账
+        def _run_card():
+            mod = __import__("tools.credit_card_recon.credit_card_recon", fromlist=["batch_card_recon"])
+            return mod.batch_card_recon(os.path.join(BASE_DIR, "data", "清远", "信用卡对账"))
         engine.register(TaskDef(
             name="credit_card_recon",
-            func=lambda: __import__(
-                "tools.credit_card_recon.credit_card_recon", fromlist=["batch_card_recon"]
-            ).batch_card_recon(os.path.join(BASE_DIR, "data", "清远", "信用卡对账")),
+            func=_run_card,
             required_paths=[os.path.join(BASE_DIR, "data", "清远", "信用卡对账")],
             priority=1,
         ))
 
     elif mode == "monthly":
         # 月度：OTA对账
+        def _run_ota():
+            mod = __import__("tools.ar_recon.batch_runner", fromlist=["batch_ota_recon"])
+            return mod.batch_ota_recon(os.path.join(BASE_DIR, "data", "清远", "OTA对账"))
         engine.register(TaskDef(
             name="ota_recon",
-            func=lambda: __import__(
-                "tools.ar_recon.batch_runner", fromlist=["batch_ota_recon"]
-            ).batch_ota_recon(os.path.join(BASE_DIR, "data", "清远", "OTA对账")),
+            func=_run_ota,
             required_paths=[os.path.join(BASE_DIR, "data", "清远", "OTA对账")],
             priority=1,
         ))
