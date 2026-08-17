@@ -3,6 +3,7 @@
 import os
 import asyncio
 import logging
+import json
 from datetime import datetime
 from typing import Callable, Awaitable
 from dataclasses import dataclass, field
@@ -19,6 +20,9 @@ class TaskResult:
     output: str = ""
     error: str = ""
     duration_ms: int = 0
+    status: str = ""          # success / failed / skipped
+    run_id: str = ""          # 所属调度批次ID
+    skipped_reason: str = ""  # 被跳过原因
 
 @dataclass
 class TaskDef:
@@ -36,13 +40,17 @@ class TaskDef:
     timeout: int = 300
     # 失败重试次数，默认2次
     retries: int = 2
+    # 依赖失败时是否跳过（默认True，即上游失败则跳过）
+    skip_on_upstream_failure: bool = True
 
 class TaskEngine:
     """智能任务发现 + 拓扑排序 + 并行执行"""
 
-    def __init__(self):
+    def __init__(self,run_id:str=""):
         self.tasks: dict[str, TaskDef] = {}
         self.results: dict[str, TaskResult] = {}
+        self.run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
     def register(self, task: TaskDef):
         self.tasks[task.name] = task
@@ -55,6 +63,19 @@ class TaskEngine:
             if paths_ok:
                 available.append(name)
         return available
+
+    def _any_upstream_failed(self, task_name: str) -> tuple[bool, str]:
+        """检查任务的上游依赖是否有失败/跳过的，返回 (是否失败, 原因)"""
+        task = self.tasks.get(task_name)
+        if not task:
+            return False, ""
+        for dep in task.depends_on:
+            dep_result = self.results.get(dep)
+            if dep_result and not dep_result.success:
+                return True, f"上游任务 [{dep}] 失败: {dep_result.error}"
+            if dep_result and dep_result.status == "skipped":
+                return True, f"上游任务 [{dep}] 被跳过: {dep_result.skipped_reason}"
+        return False, ""
 
     def sort_tasks(self, task_names: list[str]) -> list[list[str]]:
         """拓扑排序 + 优先级，返回按批次分组的任务（同批次可并行）"""
@@ -106,11 +127,11 @@ class TaskEngine:
                 # 成功，返回结果
                 duration=int((datetime.now() - start).total_seconds() * 1000)
                 retry_info=f"(重试{attempt}次后成功)" if attempt>0 else ""
-                return TaskResult(name=name, success=True, output=str(output)+retry_info,duration_ms=duration)
+                return TaskResult(name=name, success=True,status="success", output=str(output)+retry_info,duration_ms=duration, run_id=self.run_id)
 
             except asyncio.TimeoutError:
                 # 超时，记录错误，等待后重试
-                last_error=last_error = f"第{attempt + 1}次执行超时（>{task.timeout}秒）"
+                last_error = f"第{attempt + 1}次执行超时（>{task.timeout}秒）"
                 logger.warning(f"任务 {name} {last_error}")
                 if attempt<task.retries:
                     await asyncio.sleep(1*(attempt+1))
@@ -123,10 +144,27 @@ class TaskEngine:
 
         # 全部重试用完：返回失败
         duration = int((datetime.now() - start).total_seconds() * 1000)
+        error_msg=f"{last_error} (已重试{task.retries}次，全部失败)"
+
+        # 写入失败日志，供前端提示人工处理
+        try:
+            failed_log=os.path.join(BASE_DIR,"data","failed_tasks.jsonl")
+            os.makedirs(os.path.dirname(failed_log), exist_ok=True)
+            with open(failed_log,"a",encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "timestamp":datetime.now().isoformat(),
+                    "task":name,
+                    "error":error_msg,
+                    "status":"pending_review",
+                },ensure_ascii=False)+"\n")
+        except Exception:
+            pass
+
         return TaskResult(
-            name=name, success=False,
-            error=f"{last_error}（已重试{task.retries}次，全部失败）",
-            duration_ms=duration
+            name=name, success=False,status="failed",
+            error=error_msg,
+            duration_ms=duration,
+            run_id=self.run_id,
         )
 
 
@@ -135,25 +173,47 @@ class TaskEngine:
         """完整调度流程：发现 → 排序 → 并行执行"""
         discovered = self.discover()
         if not discovered:
-            return [TaskResult(name="调度器", success=False, error="未检测到可执行的任务，请检查数据文件")]
+            return [TaskResult(name="调度器", success=False, status="failed", error="未检测到可执行的任务，请检查数据文件", run_id=self.run_id)]
 
         batches = self.sort_tasks(discovered)
         all_results = []
 
         for batch in batches:
-            if len(batch) == 1:
-                results = [await self._run_one(batch[0])]
-            else:
+            # 前置检查：本批次中是否有任务因上游失败需要跳过
+            to_run = []
+            skipped_in_batch = []
+            for name in batch:
+                failed, reason = self._any_upstream_failed(name)
+                task_def = self.tasks.get(name)
+                if failed and task_def and task_def.skip_on_upstream_failure:
+                    skip_result = TaskResult(
+                        name=name, success=False, status="skipped",
+                        error=reason, skipped_reason=reason,
+                        duration_ms=0, run_id=self.run_id,
+                    )
+                    self.results[name] = skip_result
+                    skipped_in_batch.append(skip_result)
+                else:
+                    to_run.append(name)
+
+            all_results.extend(skipped_in_batch)
+
+            # 执行实际需要运行的任务
+            if len(to_run) == 1:
+                results = [await self._run_one(to_run[0])]
+            elif len(to_run) > 1:
                 results = await asyncio.gather(
-                    *[self._run_one(name) for name in batch],
+                    *[self._run_one(name) for name in to_run],
                     return_exceptions=True
                 )
                 results = [
                     r if isinstance(r, TaskResult) else TaskResult(
-                        name=batch[i], success=False, error=str(r)
+                        name=to_run[i], success=False, status="failed", error=str(r), run_id=self.run_id
                     )
                     for i, r in enumerate(results)
                 ]
+            else:
+                results = []
 
             for r in results:
                 self.results[r.name] = r

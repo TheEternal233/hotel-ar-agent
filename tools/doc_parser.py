@@ -12,8 +12,10 @@
 """
 
 import os
+import zipfile
 from datetime import datetime
 import openpyxl
+from langsmith.evaluation._runner import ET
 
 
 def _open(path, sheet_name=None):
@@ -430,3 +432,90 @@ def detect_ota_channel(path):
         return None
     finally:
         wb.close()
+
+def _fast_read_xlsx_headers(path, max_rows=2):
+    """用 zipfile+xml 快速读取 xlsx 的前几行表头，不经过 openpyxl 完整加载"""
+    ns = {'main': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+          'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'}
+    shared_strings = []
+    sheet_names = []
+
+    try:
+        with zipfile.ZipFile(path, 'r') as zf:
+            # 读取共享字符串表
+            if 'xl/sharedStrings.xml' in zf.namelist():
+                with zf.open('xl/sharedStrings.xml') as f:
+                    tree = ET.parse(f)
+                    for si in tree.findall('.//main:t', ns):
+                        shared_strings.append(si.text or '')
+
+            # 读取工作簿关系，获取 sheet 名称
+            if 'xl/workbook.xml' in zf.namelist():
+                with zf.open('xl/workbook.xml') as f:
+                    tree = ET.parse(f)
+                    for sheet in tree.findall('.//main:sheet', ns):
+                        sheet_names.append(sheet.get('name', ''))
+
+            # 读取第一个工作表的前几行
+            sheet_path = 'xl/worksheets/sheet1.xml'
+            if sheet_path not in zf.namelist():
+                return [], sheet_names
+
+            with zf.open(sheet_path) as f:
+                tree = ET.parse(f)
+                rows = []
+                for row in tree.findall('.//main:row', ns)[:max_rows]:
+                    cells = []
+                    for cell in row.findall('.//main:c', ns):
+                        val = ''
+                        cell_type = cell.get('t', '')
+                        v_elem = cell.find('main:v', ns)
+                        if v_elem is not None and v_elem.text:
+                            if cell_type == 's':
+                                idx = int(v_elem.text)
+                                if idx < len(shared_strings):
+                                    val = shared_strings[idx]
+                            else:
+                                val = v_elem.text
+                        cells.append(val)
+                    rows.append(cells)
+                return rows, sheet_names
+    except Exception:
+        return [], sheet_names
+
+def detect_ota_channel_fast(path):
+    """快速检测 OTA 渠道，不打开 openpyxl（用于批量对账前置判断）"""
+    rows, sheet_names = _fast_read_xlsx_headers(path, max_rows=2)
+    if not rows:
+        return None
+
+    headers = [str(h) for h in rows[0] if h]
+    headers_str = " ".join(headers)
+
+    rezen_markers = ["账单号", "外部订单号", "协议单位"]
+    rezen_score = sum(1 for m in rezen_markers if m in headers_str)
+    if rezen_score >= 2:
+        return "rezen"
+
+    if "财务总对账" in sheet_names and "PMS" in sheet_names:
+        return "向蜜鸟"
+
+    if "美团订单号" in headers_str:
+        return "美团客房"
+    if "券号" in headers_str and "美食林券号" in headers_str:
+        return "携程餐饮"
+    if "券号" in headers_str and "订单号" in headers_str and "售价" in headers_str:
+        return "美团餐饮"
+    if "核销时间" in headers_str and "订单编号" in headers_str:
+        return "抖音"
+    if "套餐订单号" in headers_str or ("订单号" in headers_str and "入住人" in headers_str):
+        return "飞猪"
+
+    # Check for 携程客房 (header in row 2)
+    if "预付订单明细" in headers_str or "订单类型" in headers_str:
+        if len(rows) > 1:
+            row2_str = " ".join(str(v) for v in rows[1] if v)
+            if "订单号" in row2_str and "结算价" in row2_str:
+                return "携程客房"
+
+    return None
