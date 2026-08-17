@@ -261,6 +261,8 @@
 
       window._otaState.channel = resp.channel;
       window._otaState.matchData = resp.details;
+      window._otaState.matchResults = resp.raw_results || [];
+      window._otaState.matchStats = resp.stats || {};
       renderOtaMatchResults(resp.stats, resp.details);
       showOtaStep(3);
     } catch(e) { setResult("otaResult", "错误：" + e.message); }
@@ -386,7 +388,9 @@
         channel: window._otaState.channel,
         confirmed_matches: [],
         confirmed_diffs: confirmedItems,
-        comments: comment
+        comments: comment,
+        match_results: window._otaState.matchResults || [],
+        stats: window._otaState.matchStats || {}
       });
 
       if (resp.ok) {
@@ -482,6 +486,7 @@
 
   function renderCardPreview(summary, unmatched) {
     window._cardState.unmatched = unmatched || [];
+    window._cardState.reconResults = summary || [];
 
     var summaryHtml = '<h3>对账汇总</h3><table class="card-table">' +
       '<thead><tr><th>付款方式</th><th>PMS数量</th><th>POS数量</th><th>PMS金额</th><th>POS金额</th><th>差额</th><th>状态</th></tr></thead><tbody>';
@@ -548,7 +553,8 @@
         bank_statement_path: window._cardState.bankPath,
         pms_card_path: window._cardState.pmsPath,
         review_items: reviewItems,
-        comments: comment
+        comments: comment,
+        recon_results: window._cardState.reconResults || []
       });
       if (resp.ok) {
         setResult("cardResult", "审核完成\n已核实项: " + resp.reviewed_count + "\n批注: " + (resp.comments || "无") + "\n\n" + resp.result);

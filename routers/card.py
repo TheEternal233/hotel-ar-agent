@@ -119,7 +119,7 @@ async def card_recon_preview(req: CardReconRequest):
 
 @router.post("/card/recon_confirm")
 async def card_recon_confirm(req: CardReconConfirmRequest):
-    """人工审核确认后生成对账报告"""
+    """人工审核确认后生成对账报告。优先使用前端传入的recon_results，避免重复匹配"""
     try:
         bank_path = req.bank_statement_path
         pms_path = req.pms_card_path
@@ -127,26 +127,30 @@ async def card_recon_confirm(req: CardReconConfirmRequest):
             if not p or not os.path.exists(p):
                 raise HTTPException(status_code=400, detail=f"文件不存在: {p}")
 
-        bank_lower = bank_path.lower()
-        pms_lower = pms_path.lower()
-
-        recon_results = []
-        if "yfd" in bank_lower and "alipay" in bank_lower and "yfd" in pms_lower and "alipay" in pms_lower:
-            pms_txs = _read_yfd_pms(pms_path, "YFD 支付宝")
-            bank_txs = _read_yfd_bank(bank_path)
-            recon_results.append(_reconcile_channel("YFD支付宝", pms_txs, bank_txs))
-        elif "yfd" in bank_lower and "wechat" in bank_lower and "yfd" in pms_lower and "wechat" in pms_lower:
-            pms_txs = _read_yfd_pms(pms_path, "YFD 微信")
-            bank_txs = _read_yfd_bank(bank_path)
-            recon_results.append(_reconcile_channel("YFD微信", pms_txs, bank_txs))
+        # 优先使用前端传入的匹配结果，避免重复计算
+        if req.recon_results:
+            recon_results = req.recon_results
         else:
-            pms_groups = _read_pms_report(pms_path)
-            pos_groups = _read_pos_statement(bank_path)
-            for method in RECON_PAYMENT_METHODS:
-                pms_txs = pms_groups.get(method, [])
-                pos_txs = pos_groups.get(method, [])
-                if pms_txs or pos_txs:
-                    recon_results.append(_reconcile_channel(method, pms_txs, pos_txs))
+            # 兼容旧逻辑：前端未传入时重新执行匹配
+            bank_lower = bank_path.lower()
+            pms_lower = pms_path.lower()
+            recon_results = []
+            if "yfd" in bank_lower and "alipay" in bank_lower and "yfd" in pms_lower and "alipay" in pms_lower:
+                pms_txs = _read_yfd_pms(pms_path, "YFD 支付宝")
+                bank_txs = _read_yfd_bank(bank_path)
+                recon_results.append(_reconcile_channel("YFD支付宝", pms_txs, bank_txs))
+            elif "yfd" in bank_lower and "wechat" in bank_lower and "yfd" in pms_lower and "wechat" in pms_lower:
+                pms_txs = _read_yfd_pms(pms_path, "YFD 微信")
+                bank_txs = _read_yfd_bank(bank_path)
+                recon_results.append(_reconcile_channel("YFD微信", pms_txs, bank_txs))
+            else:
+                pms_groups = _read_pms_report(pms_path)
+                pos_groups = _read_pos_statement(bank_path)
+                for method in RECON_PAYMENT_METHODS:
+                    pms_txs = pms_groups.get(method, [])
+                    pos_txs = pos_groups.get(method, [])
+                    if pms_txs or pos_txs:
+                        recon_results.append(_reconcile_channel(method, pms_txs, pos_txs))
 
         result_text = _generate_recon_report(recon_results)
 

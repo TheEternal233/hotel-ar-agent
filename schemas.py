@@ -63,6 +63,7 @@ class CardReconConfirmRequest(BaseModel):
     pms_card_path: str
     review_items: list=[]
     comments: str=""
+    recon_results: list=[] # 前端传入preview时的匹配结果
 
 
 
@@ -82,4 +83,6 @@ class OtaConfirmRequest(BaseModel):
     confirmed_matches: list = []
     confirmed_diffs: list = []
     comments: str = ""
+    match_results: list = []  # 前端传入preview时的匹配结果
+    stats: dict = {}
 

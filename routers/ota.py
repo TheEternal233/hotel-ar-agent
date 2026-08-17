@@ -130,7 +130,8 @@ async def ota_match_preview(req: OtaMatchRequest):
                 "diff": diff_list,
                 "ota_only": ota_only_list,
                 "pms_only": pms_only_list,
-            }
+            },
+            "raw_results": results # 原始匹配结果
         }
     except Exception as e:
         logger.error(f"OTA match preview error: {e}")
@@ -138,7 +139,7 @@ async def ota_match_preview(req: OtaMatchRequest):
 
 @router.post("/ota/confirm")
 async def ota_confirm(req: OtaConfirmRequest):
-    """Step 3: 用户确认差异后，生成最终报告"""
+    """Step 3: 用户确认差异后，生成最终报告。优先使用前端传入的match_results，避免重复匹配"""
     try:
         import os
         from tools.ar_recon.report_generator import _generate_ar_report_a, _generate_ar_report_fnb, _generate_ar_report
@@ -146,21 +147,31 @@ async def ota_confirm(req: OtaConfirmRequest):
 
         channel = req.channel or detect_ota_channel(req.ota_path)
 
-        # 重新执行匹配获取完整结果
+        # 优先使用前端传入的匹配结果，避免重复计算
+        if req.match_results:
+            results = req.match_results
+            stats = req.stats or {}
+        else:
+            # 兼容旧逻辑：前端未传入时重新执行匹配
+            if channel == "向蜜鸟":
+                from utils.ar_recon_utils import read_xiangminiao
+                ota_records, card_records, rezen_records = read_xiangminiao(req.ota_path)
+                results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
+            elif channel in FNB_CHANNELS:
+                ota_records = read_ota_channel(req.ota_path, channel)
+                rezen_records = read_rezen(req.pms_path)
+                results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
+            else:
+                ota_records = read_ota_channel(req.ota_path, channel)
+                rezen_records = read_rezen(req.pms_path)
+                results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
+
+        # 生成报告
         if channel == "向蜜鸟":
-            from utils.ar_recon_utils import read_xiangminiao
-            ota_records, card_records, rezen_records = read_xiangminiao(req.ota_path)
-            results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
             report_path = _generate_ar_report(results, stats, channel, req.ota_path, req.pms_path)
         elif channel in FNB_CHANNELS:
-            ota_records = read_ota_channel(req.ota_path, channel)
-            rezen_records = read_rezen(req.pms_path)
-            results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
             report_path = _generate_ar_report_fnb(results, stats, channel, req.ota_path, req.pms_path)
         else:
-            ota_records = read_ota_channel(req.ota_path, channel)
-            rezen_records = read_rezen(req.pms_path)
-            results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
             report_path = _generate_ar_report_a(results, stats, channel, req.ota_path, req.pms_path)
 
         # 清理上传文件
