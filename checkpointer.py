@@ -11,12 +11,14 @@ JsonFileSaver — 基于 JSON 文件的 LangGraph 检查点，无 SQLite 依赖�
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import os
 import threading
+import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Optional, List, Tuple
+from typing import Any, Optional, List, Tuple, Set
 
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
@@ -31,7 +33,7 @@ from langgraph.checkpoint.base import (
 
 class JsonFileSaver(BaseCheckpointSaver):
     """
-    基于 JSON 文件的检查点，无 SQLite 依赖。
+    基于 JSON 文件的检查点。
     每个 thread_id 一个文件，按需加载/卸载，内存 LRU 缓存。
     接口与 InMemorySaver 完全兼容。
     """
@@ -40,14 +42,22 @@ class JsonFileSaver(BaseCheckpointSaver):
         self,
         save_dir: str | Path = "./data/memory",
         max_cache_threads: int = 50,
+        flush_interval: float = 2.0,
     ):
         super().__init__()
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.max_cache = max(max_cache_threads, 1)
+        self.flush_interval = flush_interval
         # 内存缓存：thread_id -> 存储数据
         self._cache: dict[str, dict] = {}
         self._lock = threading.RLock()
+        # 异步刷盘：待写入队列 + 后台线程
+        self._dirty: Set[str] = set()
+        self._flush_event = threading.Event()
+        self._shutdown = False
+        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._flush_thread.start()
 
     def _file_path(self, thread_id: str) -> Path:
         """生成线程对应的 JSON 文件路径（过滤非法字符）"""
@@ -70,7 +80,7 @@ class JsonFileSaver(BaseCheckpointSaver):
             return None
 
     def _save_to_disk(self, thread_id: str, data: dict) -> None:
-        """将完整存储数据持久化到磁盘"""
+        """将完整存储数据持久化到磁盘（同步接口，供后台线程调用）"""
         fp = self._file_path(thread_id)
         try:
             serialized = self._serialize_storage(data)
@@ -78,6 +88,32 @@ class JsonFileSaver(BaseCheckpointSaver):
                 json.dump(serialized, f, ensure_ascii=False, default=self._json_default)
         except OSError:
             pass
+
+    def _flush_loop(self) -> None:
+        """后台刷盘线程：定期将脏数据写入磁盘"""
+        while not self._shutdown:
+            # 等待 flush_interval 或显式唤醒
+            self._flush_event.wait(timeout=self.flush_interval)
+            self._flush_event.clear()
+            if self._shutdown:
+                break
+            self._do_flush()
+
+    def _do_flush(self) -> None:
+        """执行实际刷盘：批量写入所有脏数据"""
+        with self._lock:
+            dirty_list = list(self._dirty)
+            self._dirty.clear()
+        for tid in dirty_list:
+            data = self._cache.get(tid)
+            if data is not None:
+                self._save_to_disk(tid, data)
+
+    def _mark_dirty(self, thread_id: str) -> None:
+        """标记 thread_id 为脏数据，触发后台异步写入"""
+        with self._lock:
+            self._dirty.add(thread_id)
+        self._flush_event.set()
 
     @staticmethod
     def _json_default(obj: Any) -> Any:
@@ -329,8 +365,8 @@ class JsonFileSaver(BaseCheckpointSaver):
             }
         )
 
-        # 同步保存到磁盘
-        self._save_to_disk(thread_id, data)
+        # 标记脏数据，由后台线程异步写入磁盘
+        self._mark_dirty(thread_id)
 
         return {
             "configurable": {
@@ -367,8 +403,8 @@ class JsonFileSaver(BaseCheckpointSaver):
                 task_path,
             )
 
-        # 同步保存到磁盘
-        self._save_to_disk(thread_id, data)
+        # 标记脏数据，由后台线程异步写入磁盘
+        self._mark_dirty(thread_id)
 
     def list(
         self,
@@ -461,17 +497,21 @@ class JsonFileSaver(BaseCheckpointSaver):
     # 管理接口
     # ------------------------------------------------------------------
 
+    def _flush_and_wait(self) -> None:
+        """强制刷盘并等待完成（用于关机等需要确保数据落盘的场景）"""
+        self._do_flush()
+
     def clear_memory(self) -> int:
         """清空内存缓存（保留磁盘文件），返回清空的数量"""
+        self._flush_and_wait()
         with self._lock:
             count = len(self._cache)
-            for tid, data in self._cache.items():
-                self._save_to_disk(tid, data)
             self._cache.clear()
             return count
 
     def clear_all(self) -> int:
         """清空内存和磁盘所有检查点，返回删除的文件数"""
+        self._flush_and_wait()
         with self._lock:
             self._cache.clear()
             count = 0
@@ -491,4 +531,5 @@ class JsonFileSaver(BaseCheckpointSaver):
                 "max_cache": self.max_cache,
                 "save_dir": str(self.save_dir),
                 "disk_files": len(list(self.save_dir.glob("*.json"))),
+                "dirty_threads": len(self._dirty),
             }
