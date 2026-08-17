@@ -53,18 +53,76 @@
 <section id="panel-ota" class="panel">
   <div class="panel-header"><h2>OTA平台月度对账工作台</h2></div>
   <div class="workbench">
-    <div class="wb-steps">
-      <div class="step active"><span>1</span>上传文件</div>
-      <div class="step"><span>2</span>自动匹配</div>
-      <div class="step"><span>3</span>差异标注</div>
-      <div class="step"><span>4</span>佣金计算</div>
-      <div class="step"><span>5</span>凭证预览</div>
+    <div class="wb-steps" id="otaSteps">
+      <div class="step active" data-step="1"><span>1</span>上传文件</div>
+      <div class="step" data-step="2"><span>2</span>确认预览</div>
+      <div class="step" data-step="3"><span>3</span>匹配明细</div>
+      <div class="step" data-step="4"><span>4</span>差异确认</div>
+      <div class="step" data-step="5"><span>5</span>生成报告</div>
     </div>
-    <div class="wb-form">
-      <div class="form-group"><label>OTA报表 (.xlsx)</label><input type="file" id="otaFile" accept=".xlsx,.xls" onchange="updateOtaPath()"><span class="path-hint" id="otaPathHint"></span></div>
-      <div class="form-group"><label>PMS营业报表 (.xlsx)</label><input type="file" id="pmsFile" accept=".xlsx,.xls" onchange="updatePmsPath()"><span class="path-hint" id="pmsPathHint"></span></div>
-      <button class="btn-primary" onclick="runOtaRecon()">开始对账</button>
+
+    <!-- Step 1: 上传文件 -->
+    <div id="otaStep1">
+      <div class="wb-form">
+        <div class="form-group"><label>OTA报表 (.xlsx)</label><input type="file" id="otaFile" accept=".xlsx,.xls" onchange="updateOtaPath()"><span class="path-hint" id="otaPathHint"></span></div>
+        <div class="form-group"><label>PMS营业报表 (.xlsx)</label><input type="file" id="pmsFile" accept=".xlsx,.xls" onchange="updatePmsPath()"><span class="path-hint" id="pmsPathHint"></span></div>
+        <button class="btn-primary" id="otaUploadBtn" onclick="runOtaUpload()">上传并预览</button>
+      </div>
     </div>
+
+    <!-- Step 2: 预览确认 -->
+    <div id="otaStep2" style="display:none">
+      <div class="ota-preview-section">
+        <h3>文件识别结果</h3>
+        <div id="otaPreviewOta" class="preview-card"></div>
+        <div id="otaPreviewPms" class="preview-card"></div>
+        <div class="preview-actions">
+          <button class="btn-sm" onclick="otaBackToUpload()">重新上传</button>
+          <button class="btn-primary" id="otaMatchBtn" onclick="runOtaMatch()">确认并开始匹配</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: 匹配明细 -->
+    <div id="otaStep3" style="display:none">
+      <div class="ota-match-summary" id="otaMatchSummary"></div>
+      <div class="ota-match-tabs">
+        <button class="tab-btn active" onclick="switchOtaTab('match',this)">匹配成功 (<span id="tabCountMatch">0</span>)</button>
+        <button class="tab-btn" onclick="switchOtaTab('diff',this)">金额差异 (<span id="tabCountDiff">0</span>)</button>
+        <button class="tab-btn" onclick="switchOtaTab('ota_only',this)">仅OTA (<span id="tabCountOta">0</span>)</button>
+        <button class="tab-btn" onclick="switchOtaTab('pms_only',this)">仅PMS (<span id="tabCountPms">0</span>)</button>
+      </div>
+      <div class="ota-match-content" id="otaMatchContent"></div>
+      <div class="preview-actions">
+        <button class="btn-sm" onclick="otaBackToPreview()">返回预览</button>
+        <button class="btn-primary" onclick="goToOtaDiffConfirm()">进入差异确认</button>
+      </div>
+    </div>
+
+    <!-- Step 4: 差异确认 -->
+    <div id="otaStep4" style="display:none">
+      <div class="ota-diff-section">
+        <h3>差异确认 <span class="hint">请核对差异记录，确认无误后生成报告</span></h3>
+        <div id="otaDiffList"></div>
+        <div class="card-comment-section">
+          <label>审核批注</label>
+          <textarea id="otaComment" rows="3" placeholder="输入整体审核意见..."></textarea>
+        </div>
+        <div class="preview-actions">
+          <button class="btn-sm" onclick="otaBackToMatch()">返回匹配明细</button>
+          <button class="btn-primary" id="otaConfirmBtn" onclick="runOtaConfirm()">确认并生成报告</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 5: 生成报告 -->
+    <div id="otaStep5" style="display:none">
+      <div class="ota-result-section" id="otaResultSection"></div>
+      <div class="preview-actions">
+        <button class="btn-sm" onclick="otaReset()">开始对新的对账</button>
+      </div>
+    </div>
+
     <div class="wb-result" id="otaResult"></div>
   </div>
 </section>

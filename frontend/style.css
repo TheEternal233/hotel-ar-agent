@@ -165,3 +165,39 @@ nav{flex:1;overflow-y:auto;padding:8px 0}
 .card-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
 .card-empty{padding:20px;text-align:center;color:var(--muted);font-size:13px;background:#f8fafc;border-radius:var(--radius)}
 .card-check{width:16px;height:16px;cursor:pointer}
+
+/* ===== OTA对账工作台 ===== */
+.ota-preview-section h3{font-size:14px;margin-bottom:12px;color:var(--text)}
+.preview-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:10px}
+.preview-card-inner{}
+.preview-title{font-weight:600;font-size:13px;margin-bottom:6px;color:var(--primary)}
+.preview-meta{font-size:12px;color:var(--text);margin-bottom:3px}
+.preview-headers{font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-family:monospace}
+.channel-tag{display:inline-block;padding:2px 8px;background:#dbeafe;color:#2563eb;border-radius:4px;font-size:11px;font-weight:500}
+.preview-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
+
+.ota-match-summary{margin-bottom:16px}
+.match-summary-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.match-stat{text-align:center;padding:12px;border-radius:var(--radius);border:1px solid var(--border);background:#f8fafc}
+.match-stat.success{border-color:var(--success);background:#f0fdf4}
+.match-stat.danger{border-color:var(--danger);background:#fef2f2}
+.match-stat.warning{border-color:var(--warning);background:#fffbeb}
+.match-stat.info{border-color:#3b82f6;background:#eff6ff}
+.stat-num{display:block;font-size:20px;font-weight:700;margin-bottom:2px}
+.stat-label{font-size:11px;color:var(--muted)}
+
+.ota-match-tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid var(--border)}
+.tab-btn{padding:8px 16px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;cursor:pointer;font-size:13px;color:var(--muted)}
+.tab-btn.active{border-bottom-color:var(--primary);color:var(--primary);font-weight:500}
+.tab-btn:hover{color:var(--text)}
+
+.ota-match-content{max-height:400px;overflow-y:auto;margin-bottom:16px}
+
+.ota-diff-section h3{font-size:14px;margin-bottom:8px}
+.ota-diff-section .hint{font-size:12px;color:var(--muted);font-weight:normal}
+
+.ota-result-ok{padding:20px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:var(--radius)}
+.ota-result-ok h3{margin-bottom:12px;color:var(--success)}
+.result-item{font-size:13px;margin-bottom:6px}
+
+.ota-check{width:16px;height:16px;cursor:pointer}

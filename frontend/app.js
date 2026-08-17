@@ -160,7 +160,9 @@
   var ci = document.getElementById("chatInput");
   if (ci) ci.addEventListener("keydown", function(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }});
 
-  // ===== OTA Recon (专用端点) =====
+  // ===== OTA Recon (分步流水线) =====
+  window._otaState = { otaPath: "", pmsPath: "", channel: "", matchData: null };
+
   function updateOtaPath() {
     var f = document.getElementById("otaFile").files[0];
     document.getElementById("otaPathHint").textContent = f ? f.name : "";
@@ -172,22 +174,248 @@
   window.updateOtaPath = updateOtaPath;
   window.updatePmsPath = updatePmsPath;
 
-  window.runOtaRecon = async function() {
-    var btn = document.querySelector("#panel-ota .btn-primary");
-    btnDisable(btn, "处理中..."); updateOtaStep(1); showLoading("otaResult");
+  function updateOtaStep(n) {
+    var steps = document.querySelectorAll("#otaSteps .step");
+    steps.forEach(function(s, i) {
+      s.classList.remove("active", "completed");
+      if (i + 1 < n) s.classList.add("completed");
+      if (i + 1 === n) s.classList.add("active");
+    });
+  }
+
+  function showOtaStep(stepNum) {
+    for (var i = 1; i <= 5; i++) {
+      var el = document.getElementById("otaStep" + i);
+      if (el) el.style.display = (i === stepNum) ? "block" : "none";
+    }
+    updateOtaStep(stepNum);
+  }
+
+  // Step 1: 上传文件并预览
+  window.runOtaUpload = async function() {
+    var btn = document.getElementById("otaUploadBtn");
+    btnDisable(btn, "上传中...");
     try {
       var otaPath = await uploadAndGetPath("otaFile");
-      if (!otaPath) { setResult("otaResult", "错误：请上传OTA报表"); btnEnable(btn, "开始对账"); return; }
-      updateOtaStep(2); setResult("otaResult", "OTA已上传，正在上传PMS...");
+      if (!otaPath) { setResult("otaResult", "错误：请上传OTA报表"); btnEnable(btn, "上传并预览"); return; }
       var pmsPath = await uploadAndGetPath("pmsFile");
-      if (!pmsPath) { setResult("otaResult", "错误：请上传PMS报表"); btnEnable(btn, "开始对账"); return; }
-      updateOtaStep(3); setResult("otaResult", "正在匹配订单...");
-      var resp = await apiPost("/ota/recon", { ota_path: otaPath, pms_path: pmsPath });
-      updateOtaStep(4); setResult("otaResult", "正在计算佣金...");
-      updateOtaStep(5);
-      setResult("otaResult", resp.ok ? resp.result : ("错误：" + (resp.detail || "未知")));
+      if (!pmsPath) { setResult("otaResult", "错误：请上传PMS报表"); btnEnable(btn, "上传并预览"); return; }
+
+      window._otaState.otaPath = otaPath;
+      window._otaState.pmsPath = pmsPath;
+
+      var resp = await apiPost("/ota/upload_preview", { ota_path: otaPath, pms_path: pmsPath });
+      if (!resp.ok) { setResult("otaResult", "预览失败：" + (resp.detail || "未知")); btnEnable(btn, "上传并预览"); return; }
+
+      renderOtaPreview(resp.preview);
+      showOtaStep(2);
     } catch(e) { setResult("otaResult", "错误：" + e.message); }
-    btnEnable(btn, "开始对账");
+    btnEnable(btn, "上传并预览");
+  };
+
+  function renderOtaPreview(preview) {
+    var otaHtml = "", pmsHtml = "";
+    if (preview.ota) {
+      otaHtml = '<div class="preview-card-inner">' +
+        '<div class="preview-title">OTA报表</div>' +
+        '<div class="preview-meta">文件名: ' + preview.ota.filename + '</div>' +
+        '<div class="preview-meta">工作表: ' + preview.ota.sheet + '</div>' +
+        '<div class="preview-meta">数据行: ' + preview.ota.rows + ' 行</div>' +
+        '<div class="preview-meta">检测到渠道: <span class="channel-tag">' + (preview.ota.detected_channel || "未知") + '</span></div>' +
+        '<div class="preview-headers">表头: ' + preview.ota.headers.join(", ") + '</div>' +
+        '</div>';
+    }
+    if (preview.pms) {
+      pmsHtml = '<div class="preview-card-inner">' +
+        '<div class="preview-title">PMS报表</div>' +
+        '<div class="preview-meta">文件名: ' + preview.pms.filename + '</div>' +
+        '<div class="preview-meta">工作表: ' + preview.pms.sheet + '</div>' +
+        '<div class="preview-meta">数据行: ' + preview.pms.rows + ' 行</div>' +
+        '<div class="preview-meta">格式验证: ' + (preview.pms.is_rezen ? "✅ 标准Rezen格式" : "⚠️ 非标准格式") + '</div>' +
+        '<div class="preview-headers">表头: ' + preview.pms.headers.join(", ") + '</div>' +
+        '</div>';
+    }
+    document.getElementById("otaPreviewOta").innerHTML = otaHtml;
+    document.getElementById("otaPreviewPms").innerHTML = pmsHtml;
+  }
+
+  window.otaBackToUpload = function() {
+    showOtaStep(1);
+    document.getElementById("otaFile").value = "";
+    document.getElementById("pmsFile").value = "";
+    document.getElementById("otaPathHint").textContent = "";
+    document.getElementById("pmsPathHint").textContent = "";
+    window._otaState = { otaPath: "", pmsPath: "", channel: "", matchData: null };
+  };
+
+  // Step 2 -> 3: 执行匹配
+  window.runOtaMatch = async function() {
+    var btn = document.getElementById("otaMatchBtn");
+    btnDisable(btn, "匹配中...");
+    try {
+      var resp = await apiPost("/ota/match_preview", {
+        ota_path: window._otaState.otaPath,
+        pms_path: window._otaState.pmsPath
+      });
+      if (!resp.ok) { setResult("otaResult", "匹配失败：" + (resp.detail || "未知")); btnEnable(btn, "确认并开始匹配"); return; }
+
+      window._otaState.channel = resp.channel;
+      window._otaState.matchData = resp.details;
+      renderOtaMatchResults(resp.stats, resp.details);
+      showOtaStep(3);
+    } catch(e) { setResult("otaResult", "错误：" + e.message); }
+    btnEnable(btn, "确认并开始匹配");
+  };
+
+  function renderOtaMatchResults(stats, details) {
+    var summaryHtml = '<div class="match-summary-grid">' +
+      '<div class="match-stat"><span class="stat-num">' + stats.total_ota + '</span><span class="stat-label">OTA记录</span></div>' +
+      '<div class="match-stat"><span class="stat-num">' + stats.total_pms + '</span><span class="stat-label">PMS记录</span></div>' +
+      '<div class="match-stat success"><span class="stat-num">' + stats.match + '</span><span class="stat-label">匹配成功</span></div>' +
+      '<div class="match-stat danger"><span class="stat-num">' + stats.diff + '</span><span class="stat-label">金额差异</span></div>' +
+      '<div class="match-stat warning"><span class="stat-num">' + stats.ota_only + '</span><span class="stat-label">仅OTA</span></div>' +
+      '<div class="match-stat info"><span class="stat-num">' + stats.pms_only + '</span><span class="stat-label">仅PMS</span></div>' +
+      '</div>';
+    document.getElementById("otaMatchSummary").innerHTML = summaryHtml;
+
+    document.getElementById("tabCountMatch").textContent = details.match.length;
+    document.getElementById("tabCountDiff").textContent = details.diff.length;
+    document.getElementById("tabCountOta").textContent = details.ota_only.length;
+    document.getElementById("tabCountPms").textContent = details.pms_only.length;
+
+    switchOtaTab('match', document.querySelector('.ota-match-tabs .tab-btn'));
+  }
+
+  window.switchOtaTab = function(tabName, clickedBtn) {
+    document.querySelectorAll(".ota-match-tabs .tab-btn").forEach(function(btn) {
+      btn.classList.remove("active");
+    });
+    if (clickedBtn) {
+      clickedBtn.classList.add("active");
+    } else if (event && event.target) {
+      event.target.classList.add("active");
+    }
+
+    var data = window._otaState.matchData;
+    if (!data) return;
+    var items = data[tabName] || [];
+    var html = '';
+
+    if (items.length === 0) {
+      html = '<div class="card-empty">该分类下无记录</div>';
+    } else {
+      html = '<table class="card-table">' +
+        '<thead><tr>' +
+        '<th>OTA订单号</th><th>PMS订单号</th><th>OTA金额</th><th>PMS金额</th><th>差额</th><th>状态</th>' +
+        '</tr></thead><tbody>';
+      for (var i = 0; i < items.length; i++) {
+        var r = items[i];
+        var statusClass = r.status === 'match' ? 'status-ok' : (r.status === 'diff' ? 'status-diff' : '');
+        var statusText = r.status === 'match' ? '匹配' : (r.status === 'diff' ? '差异' : (r.status === 'ota_only' ? '仅OTA' : '仅PMS'));
+        html += '<tr>' +
+          '<td>' + (r.ota_order || '-') + '</td>' +
+          '<td>' + (r.pms_ext_order || '-') + '</td>' +
+          '<td>' + (r.ota_amount ? r.ota_amount.toFixed(2) : '-') + '</td>' +
+          '<td>' + (r.pms_amount ? r.pms_amount.toFixed(2) : '-') + '</td>' +
+          '<td>' + (r.diff ? r.diff.toFixed(2) : '-') + '</td>' +
+          '<td class="' + statusClass + '">' + statusText + '</td>' +
+          '</tr>';
+      }
+      html += '</tbody></table>';
+    }
+    document.getElementById("otaMatchContent").innerHTML = html;
+  };
+
+  window.otaBackToPreview = function() {
+    showOtaStep(2);
+  };
+
+  // Step 3 -> 4: 进入差异确认
+  window.goToOtaDiffConfirm = function() {
+    var data = window._otaState.matchData;
+    if (!data) return;
+    var diffItems = data.diff || [];
+    var otaOnlyItems = data.ota_only || [];
+    var pmsOnlyItems = data.pms_only || [];
+    var allIssues = diffItems.concat(otaOnlyItems).concat(pmsOnlyItems);
+
+    var html = '';
+    if (allIssues.length === 0) {
+      html = '<div class="card-empty">🎉 无差异记录，所有订单已对平</div>';
+    } else {
+      html = '<table class="card-table">' +
+        '<thead><tr><th>核实</th><th>类型</th><th>OTA订单号</th><th>PMS订单号</th><th>OTA金额</th><th>PMS金额</th><th>差额</th></tr></thead><tbody>';
+      for (var i = 0; i < allIssues.length; i++) {
+        var r = allIssues[i];
+        var typeText = r.status === 'diff' ? '金额差异' : (r.status === 'ota_only' ? '仅OTA存在' : '仅PMS存在');
+        html += '<tr>' +
+          '<td><input type="checkbox" class="ota-check" data-id="' + r.id + '" checked></td>' +
+          '<td>' + typeText + '</td>' +
+          '<td>' + (r.ota_order || '-') + '</td>' +
+          '<td>' + (r.pms_ext_order || '-') + '</td>' +
+          '<td>' + (r.ota_amount ? r.ota_amount.toFixed(2) : '-') + '</td>' +
+          '<td>' + (r.pms_amount ? r.pms_amount.toFixed(2) : '-') + '</td>' +
+          '<td>' + (r.diff ? r.diff.toFixed(2) : '-') + '</td>' +
+          '</tr>';
+      }
+      html += '</tbody></table>';
+    }
+    document.getElementById("otaDiffList").innerHTML = html;
+    showOtaStep(4);
+  };
+
+  window.otaBackToMatch = function() {
+    showOtaStep(3);
+  };
+
+  // Step 4 -> 5: 确认并生成报告
+  window.runOtaConfirm = async function() {
+    var btn = document.getElementById("otaConfirmBtn");
+    btnDisable(btn, "生成中...");
+    try {
+      var checks = document.querySelectorAll(".ota-check");
+      var confirmedItems = [];
+      for (var i = 0; i < checks.length; i++) {
+        if (checks[i].checked) confirmedItems.push(checks[i].dataset.id);
+      }
+      var comment = document.getElementById("otaComment").value.trim();
+
+      var resp = await apiPost("/ota/confirm", {
+        ota_path: window._otaState.otaPath,
+        pms_path: window._otaState.pmsPath,
+        channel: window._otaState.channel,
+        confirmed_matches: [],
+        confirmed_diffs: confirmedItems,
+        comments: comment
+      });
+
+      if (resp.ok) {
+        var resultHtml = '<div class="ota-result-ok">' +
+          '<h3>✅ 对账报告已生成</h3>' +
+          '<div class="result-item">渠道: ' + resp.channel + '</div>' +
+          '<div class="result-item">报告路径: ' + resp.report_path + '</div>' +
+          '<div class="result-item">匹配: ' + resp.stats.match + ' | 差异: ' + resp.stats.diff + ' | 仅OTA: ' + resp.stats.ota_only + ' | 仅PMS: ' + resp.stats.pms_only + '</div>' +
+          '<div class="result-item">已确认差异项: ' + resp.confirmed.diffs + '</div>' +
+          (comment ? '<div class="result-item">批注: ' + comment + '</div>' : '') +
+          '</div>';
+        document.getElementById("otaResultSection").innerHTML = resultHtml;
+        showOtaStep(5);
+      } else {
+        setResult("otaResult", "生成失败：" + (resp.detail || "未知"));
+      }
+    } catch(e) { setResult("otaResult", "错误：" + e.message); }
+    btnEnable(btn, "确认并生成报告");
+  };
+
+  window.otaReset = function() {
+    showOtaStep(1);
+    document.getElementById("otaFile").value = "";
+    document.getElementById("pmsFile").value = "";
+    document.getElementById("otaPathHint").textContent = "";
+    document.getElementById("pmsPathHint").textContent = "";
+    document.getElementById("otaComment").value = "";
+    document.getElementById("otaResultSection").innerHTML = "";
+    window._otaState = { otaPath: "", pmsPath: "", channel: "", matchData: null };
   };
 
   // ===== Aging (专用端点) =====

@@ -57,12 +57,29 @@ class FileListResponse(BaseModel):
 class FileDeleteRequest(BaseModel):
     path: str
 
-class CardReconRequest(BaseModel):
-    bank_statement_path: str
-    pms_card_path: str
 
 class CardReconConfirmRequest(BaseModel):
     bank_statement_path: str
     pms_card_path: str
     review_items: list=[]
     comments: str=""
+
+
+
+class OtaUploadRequest(BaseModel):
+    ota_path: str = ""
+    pms_path: str = ""
+
+class OtaMatchRequest(BaseModel):
+    ota_path: str
+    pms_path: str
+    channel: str = ""
+
+class OtaConfirmRequest(BaseModel):
+    ota_path: str
+    pms_path: str
+    channel: str = ""
+    confirmed_matches: list = []
+    confirmed_diffs: list = []
+    comments: str = ""
+
