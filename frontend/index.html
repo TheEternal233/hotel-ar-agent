@@ -40,6 +40,7 @@
         <button class="btn-sm" onclick="document.getElementById('fileInput').click()">上传文件</button>
         <input type="file" id="fileInput" multiple hidden onchange="handleUpload(event)">
         <span id="uploadStatus"></span>
+        <button class="btn-sm btn-new-chat" onclick="newChat()" title="开始新对话">+ 新对话</button>
       </div>
       <div class="input-row">
         <textarea id="chatInput" placeholder="输入需求，例如：对账、账龄分析..." rows="2"></textarea>

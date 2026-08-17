@@ -27,29 +27,39 @@ def _make_out_path(channel_name):
     return os.path.join(ota_dir, REPORT_FILENAME_FMT.format(cname, now))
 
 
-def _init_workbook(ar_mode=False, ota_path=None, pms_path=None):
-    """初始化 Workbook；AR 模式下复制源文件 sheet"""
+def _init_workbook(ar_mode=False, ota_path=None, pms_path=None,
+                     ota_wb=None, pms_wb=None):
+    """初始化 Workbook；AR 模式下复制源文件 sheet
+
+    支持传入已加载的 workbook 对象(ota_wb/pms_wb)，避免重复从磁盘加载。
+    调用方负责关闭传入的 workbook。
+    """
     wb = openpyxl.Workbook()
     if not ar_mode:
         return wb
 
     wb.remove(wb.active)
     if ota_path == pms_path:
-        src_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        src_wb = ota_wb or openpyxl.load_workbook(ota_path, data_only=False)
         try:
             for ws in src_wb.worksheets:
                 new_title = OTA_PREFIX if ws.title == XIANGMINIAO_OTA_SHEET else None
                 _copy_sheet_to_wb(ws, wb, title=new_title)
         finally:
-            src_wb.close()
+            if ota_wb is None:
+                src_wb.close()
     else:
-        for path, prefix in ((pms_path, PMS_PREFIX), (ota_path, OTA_PREFIX)):
-            src_wb = openpyxl.load_workbook(path, data_only=False)
+        for path, prefix, cached_wb in (
+            (pms_path, PMS_PREFIX, pms_wb),
+            (ota_path, OTA_PREFIX, ota_wb),
+        ):
+            src_wb = cached_wb or openpyxl.load_workbook(path, data_only=False)
             try:
                 for idx, ws in enumerate(src_wb.worksheets):
                     _copy_sheet_to_wb(ws, wb, title=prefix if idx == 0 else None)
             finally:
-                src_wb.close()
+                if cached_wb is None:
+                    src_wb.close()
     return wb
 
 
@@ -216,12 +226,15 @@ def _generate_report(results, stats, channel_name, ota_path, pms_path):
     return _save_and_close(wb, out_path)
 
 
-def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
+def _generate_ar_report(results, stats, channel_name, ota_path, pms_path,
+                        ota_wb=None, pms_wb=None):
+    """生成AR报告，支持传入已加载的 workbook 避免重复读取源文件。"""
     out_path = _make_out_path(channel_name)
-    wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
+    wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path,
+                        ota_wb=ota_wb, pms_wb=pms_wb)
 
-    _STATUS_ORDER={STATUS_MATCH:0,STATUS_DIFF:1,STATUS_PMS_ONLY:2,STATUS_OTA_ONLY:3}
-    results=sorted(results, key=lambda r:_STATUS_ORDER.get(r["status"],9))
+    _STATUS_ORDER = {STATUS_MATCH: 0, STATUS_DIFF: 1, STATUS_PMS_ONLY: 2, STATUS_OTA_ONLY: 3}
+    results = sorted(results, key=lambda r: _STATUS_ORDER.get(r["status"], 9))
 
     ws = wb.create_sheet(SHEET_SUMMARY)
     row = _write_summary_block(ws, 1, _build_std_info(results, stats, channel_name, ota_path, pms_path), _std_red_check)
@@ -239,12 +252,15 @@ def _generate_ar_report(results, stats, channel_name, ota_path, pms_path):
     return _save_and_close(wb, out_path)
 
 
-def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
+def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path,
+                            ota_wb=None, pms_wb=None):
+    """生成F&B渠道AR报告，支持传入已加载的 workbook 避免重复读取源文件。"""
     out_path = _make_out_path(channel_name)
-    wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
+    wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path,
+                        ota_wb=ota_wb, pms_wb=pms_wb)
 
-    _STATUS_ORDER={STATUS_MATCH:0,STATUS_DIFF:1,STATUS_PMS_ONLY:2,STATUS_OTA_ONLY:3}
-    results=sorted(results, key=lambda r:_STATUS_ORDER.get(r["status"],9))
+    _STATUS_ORDER = {STATUS_MATCH: 0, STATUS_DIFF: 1, STATUS_PMS_ONLY: 2, STATUS_OTA_ONLY: 3}
+    results = sorted(results, key=lambda r: _STATUS_ORDER.get(r["status"], 9))
 
     ws = wb.create_sheet(SHEET_SUMMARY)
     row = _write_summary_block(ws, 1, _build_fnb_info(results, stats, channel_name, ota_path, pms_path), _fnb_red_check)
@@ -262,63 +278,66 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path):
     return _save_and_close(wb, out_path)
 
 
-def _generate_ar_report_a(results,stats,channel_name,ota_path,pms_path):
-    """A类渠道报告，前两个为PMS，OTA源文件，第三为PMS原表+差异字段，ota_only单独列出"""
+def _generate_ar_report_a(results, stats, channel_name, ota_path, pms_path,
+                           pms_headers=None, pms_raw_rows=None):
+    """A类渠道报告，前两个为PMS，OTA源文件，第三为PMS原表+差异字段，ota_only单独列出
+
+    支持传入已读取的 pms_headers 和 pms_raw_rows，避免重复读取 PMS 文件。
+    """
     out_path = _make_out_path(channel_name)
-    wb= _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
 
-    ws=wb.create_sheet(SHEET_SUMMARY)
+    # 若调用方已提供解析后的数据，则复用；否则回退到重新读取
+    if pms_headers is None or pms_raw_rows is None:
+        pms_headers, pms_raw_rows = read_sheet(pms_path)
 
-    pms_headers,pms_raw_rows=read_sheet(pms_path)
-    while pms_headers and pms_headers[-1]=="":
+    wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
+
+    ws = wb.create_sheet(SHEET_SUMMARY)
+
+    while pms_headers and pms_headers[-1] == "":
         pms_headers.pop()
 
-    bill_to_row={}
+    bill_to_row = {}
     for row in pms_raw_rows:
-        bid=str(row.get("账单号","")or "")
+        bid = str(row.get("账单号", "") or "")
         if bid:
-            bill_to_row[bid]=row
+            bill_to_row[bid] = row
 
-
-    bill_to_result={}
-    ota_only_results=[]
+    bill_to_result = {}
+    ota_only_results = []
     for r in results:
-        if r["status"]==STATUS_OTA_ONLY:
+        if r["status"] == STATUS_OTA_ONLY:
             ota_only_results.append(r)
             continue
-        pms=r.get("pms")
+        pms = r.get("pms")
         if pms:
-            bid=pms.get("bill_id","")
+            bid = pms.get("bill_id", "")
             if bid:
-                bill_to_result[bid]=r
+                bill_to_result[bid] = r
 
-    all_hdrs=pms_headers + AR_DIFF_HDRS
+    all_hdrs = pms_headers + AR_DIFF_HDRS
 
-    n_pms=len(pms_headers)
-    _write_headers(ws,1,all_hdrs)
+    n_pms = len(pms_headers)
+    _write_headers(ws, 1, all_hdrs)
 
-    _STATUS_ORDER={STATUS_MATCH:0,STATUS_DIFF:1,STATUS_PMS_ONLY:2,STATUS_OTA_ONLY:3}
-    sorted_results=sorted(results,key=lambda r: _STATUS_ORDER.get(r["status"],9))
-    row_idx=2
+    _STATUS_ORDER = {STATUS_MATCH: 0, STATUS_DIFF: 1, STATUS_PMS_ONLY: 2, STATUS_OTA_ONLY: 3}
+    sorted_results = sorted(results, key=lambda r: _STATUS_ORDER.get(r["status"], 9))
+    row_idx = 2
     for r in sorted_results:
-        pms=r.get("pms")
+        pms = r.get("pms")
         if pms:
-            bid=pms.get("bill_id","")
-            raw_row=bill_to_row.get(bid,{})
-            for j,h in enumerate(pms_headers,1):
-                c=ws.cell(row=row_idx,column=j,value=raw_row.get(h))
-                c.border=THIN_BORDER
+            bid = pms.get("bill_id", "")
+            raw_row = bill_to_row.get(bid, {})
+            for j, h in enumerate(pms_headers, 1):
+                c = ws.cell(row=row_idx, column=j, value=raw_row.get(h))
+                c.border = THIN_BORDER
 
+        diff_vals = [r["status"], r.get("ota_order", ""), r.get("ota_amount", 0), r.get("diff", 0), ""]
 
-        diff_vals=[r["status"],r.get("ota_order",""),r.get("ota_amount",0),r.get("diff",0),""]
-
-
-        for j,v in enumerate(diff_vals,n_pms+1):
-            c=ws.cell(row=row_idx,column=j,value=v)
-            c.border=THIN_BORDER
-            _apply_status_color(c,r["status"])
-        row_idx+=1
-
-
+        for j, v in enumerate(diff_vals, n_pms + 1):
+            c = ws.cell(row=row_idx, column=j, value=v)
+            c.border = THIN_BORDER
+            _apply_status_color(c, r["status"])
+        row_idx += 1
 
     return _save_and_close(wb, out_path)

@@ -66,10 +66,15 @@
   }
 
   // Chat API (only for AI dialog)
+  var _chatThreadId = localStorage.getItem("ar_chat_thread_id") || null;
   async function callChat(message) {
+    if (!_chatThreadId) {
+      _chatThreadId = "web-" + Date.now();
+      localStorage.setItem("ar_chat_thread_id", _chatThreadId);
+    }
     var r = await fetch(API + "/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: message, thread_id: "web-" + Date.now() })
+      body: JSON.stringify({ message: message, thread_id: _chatThreadId })
     });
     var d = await r.json(); return d.response || "";
   }
@@ -111,11 +116,23 @@
   }
   window.sendMessage = sendMessage;
 
+  function newChat() {
+    localStorage.removeItem("ar_chat_thread_id");
+    _chatThreadId = null;
+    document.getElementById("chatMessages").innerHTML =
+      '<div class="msg system"><div class="msg-content">欢迎使用酒店应收会计AI智能体系统。我可以帮您：OTA对账 / 账龄分析 / 携程佣金 / 信用卡对账 / 协议客户对账 / 发票管理 / 环境验证。请直接输入需求或上传文件后开始。</div></div>';
+  }
+  window.newChat = newChat;
+
   async function streamChat(msg, filePaths) {
     addMsg("system", "思考中...", "think");
+    if (!_chatThreadId) {
+      _chatThreadId = "web-" + Date.now();
+      localStorage.setItem("ar_chat_thread_id", _chatThreadId);
+    }
     var body = {
         message: msg,
-        thread_id: "web-" + Date.now(),
+        thread_id: _chatThreadId,
         uploaded_files: filePaths || []
     };
     var r = await fetch(API + "/chat/stream", {

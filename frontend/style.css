@@ -40,6 +40,8 @@ nav{flex:1;overflow-y:auto;padding:8px 0}
 .btn-primary:hover{background:var(--primary-dark)}
 .btn-sm{padding:5px 10px;background:#f1f5f9;color:var(--text);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px}
 .btn-sm:hover{background:#e2e8f0}
+.btn-new-chat{margin-left:auto;background:var(--success);color:#fff;border-color:var(--success)}
+.btn-new-chat:hover{background:#15803d}
 
 /* Workbench */
 .workbench{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:20px}

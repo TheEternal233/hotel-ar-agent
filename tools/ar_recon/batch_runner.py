@@ -1,13 +1,14 @@
 import os
+import re
 from datetime import datetime
 
 import openpyxl
 
 from tools.ar_recon import _match_ota_rezen_fnb, _match_ota_rezen, FNB_CHANNELS, match_xiangminiao
-from enums.common_enum import YELLOW_FILL, THIN_BORDER, HEADER_FILL, BASE_DIR,  OUT_DIR, HEADER_FONT
+from enums.common_enum import YELLOW_FILL, THIN_BORDER, HEADER_FILL, BASE_DIR, OUT_DIR, HEADER_FONT
 from tools.ar_recon.report_generator import _generate_report, _generate_ar_report_fnb, _generate_ar_report, \
     _generate_ar_report_a
-from tools.doc_parser import detect_ota_channel_fast, read_ota_channel, read_rezen
+from tools.doc_parser import detect_ota_channel_fast, read_ota_channel, read_rezen, read_sheet
 from utils.ar_recon_utils import read_xiangminiao
 from tools.ar_recon.constants import (
     SUPPORTED_EXTS, PMS_MARKER, DEFAULT_DATA_SUBDIR, SUMMARY_FILENAME_FMT,
@@ -51,7 +52,15 @@ def batch_ota_recon(data_dir=None):
                 all_stats.append(f"向蜜鸟({ota_file}): 读取失败 - {e}")
                 continue
             results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
-            report_path = _generate_ar_report(results, stats, channel, ota_path, ota_path)
+            # 向蜜鸟 ota_path == pms_path，提前加载 wb 避免 _init_workbook 重复读取同一文件
+            xmn_wb = openpyxl.load_workbook(ota_path, data_only=False)
+            try:
+                report_path = _generate_ar_report(
+                    results, stats, channel, ota_path, ota_path,
+                    ota_wb=xmn_wb, pms_wb=xmn_wb,
+                )
+            finally:
+                xmn_wb.close()
             all_stats.append({
                 "channel": channel,
                 "file": ota_file,
@@ -60,7 +69,7 @@ def batch_ota_recon(data_dir=None):
             })
             all_reports.append(report_path)
             continue    #跳过后续文件配对逻辑，因为向蜜鸟单个文件，不需要找rezen配对文件
-        import re
+
         ota_clean = re.sub(r'[0-9]+$', '', ota_base).strip()
         matched_rezen = None
         for rf_clean, rf in rezen_lookup.items():
@@ -78,8 +87,6 @@ def batch_ota_recon(data_dir=None):
             continue
         rezen_path = os.path.join(data_dir, matched_rezen)
 
-
-
         try:
             ota_records = read_ota_channel(ota_path, channel)
             rezen_records = read_rezen(rezen_path)
@@ -93,7 +100,12 @@ def batch_ota_recon(data_dir=None):
             report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, rezen_path)
         else:
             results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-            report_path = _generate_ar_report_a(results, stats, channel, ota_path, rezen_path)
+            # A类报告需要PMS原始表头+行数据，提前读取避免 _generate_ar_report_a 内部重复加载
+            pms_headers, pms_raw_rows = read_sheet(rezen_path)
+            report_path = _generate_ar_report_a(
+                results, stats, channel, ota_path, rezen_path,
+                pms_headers=pms_headers, pms_raw_rows=pms_raw_rows,
+            )
         all_stats.append({
             "channel": channel,
             "file": ota_file,
