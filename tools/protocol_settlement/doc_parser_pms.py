@@ -46,7 +46,7 @@ def _open_workbook(path:str,sheet_name:str=None):
     """打开Excel工作簿，返回(workbook,worksheet)"""
     if not os.path.exists(path):
         raise FileNotFoundError(f"文件不存在:{path}")
-    wb=openpyxl.load_workbook(path,data_only=True)
+    wb=openpyxl.load_workbook(path,data_only=True,read_only=True)
     try:
         ws=wb[sheet_name] if sheet_name else wb.active
         return wb,ws

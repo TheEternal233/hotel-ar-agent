@@ -19,7 +19,7 @@ def _unique_sheet_name(wb, name):
 
 
 def _copy_sheet_to_wb(src_ws, dst_wb, title=None):
-
+    """将源工作表复制到目标工作簿，保留合并单元格、列宽、行高、冻结窗格、单元格内容和样式。"""
     if title is None:
         title = src_ws.title
     title = _unique_sheet_name(dst_wb, title)
@@ -42,28 +42,33 @@ def _copy_sheet_to_wb(src_ws, dst_wb, title=None):
         dst_ws.freeze_panes = src_ws.freeze_panes
 
     # 单元格内容、公式与样式
-    for row in src_ws.iter_rows():
-        for cell in row:
-            new_cell = dst_ws.cell(row=cell.row, column=cell.column, value=cell.value)
-            if cell.has_style:
-                new_cell.font = copy(cell.font)
-                new_cell.border = copy(cell.border)
-                new_cell.fill = copy(cell.fill)
-                new_cell.number_format = copy(cell.number_format)
-                new_cell.protection = copy(cell.protection)
-                new_cell.alignment = copy(cell.alignment)
-            if cell.hyperlink:
-                new_cell.hyperlink = copy(cell.hyperlink)
-            if cell.comment:
-                new_cell.comment = copy(cell.comment)
+    # 优化：直接遍历 _cells 字典，只处理实际存在的单元格，跳过空单元格
+    # 这比 iter_rows() 遍历整个矩形区域更高效，尤其是稀疏表格
+    for (row, col), cell in src_ws._cells.items():
+        new_cell = dst_ws.cell(row=row, column=col, value=cell.value)
+        if cell.has_style:
+            new_cell.font = copy(cell.font)
+            new_cell.border = copy(cell.border)
+            new_cell.fill = copy(cell.fill)
+            new_cell.number_format = copy(cell.number_format)
+            new_cell.protection = copy(cell.protection)
+            new_cell.alignment = copy(cell.alignment)
+        if cell.hyperlink:
+            new_cell.hyperlink = copy(cell.hyperlink)
+        if cell.comment:
+            new_cell.comment = copy(cell.comment)
 
     return dst_ws
 
 
 
 def read_xiangminiao(path):
-    """读取向蜜鸟对账文件（同文件多sheet）"""
-    wb = openpyxl.load_workbook(path, data_only=True)
+    """读取向蜜鸟对账文件（同文件多sheet）
+
+    使用 read_only=True 减少内存占用，因为该函数只读取数据不修改。
+    对账文件中的字段通常为原始数值，不涉及公式计算。
+    """
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     try:
         def _find_idx(headers_lower, *keywords):
             for kw in keywords:

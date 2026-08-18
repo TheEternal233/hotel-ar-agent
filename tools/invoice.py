@@ -58,6 +58,8 @@ def invoice_gen(receivable_path: str, invoice_type: str = "普通发票") -> str
     grand_total = 0
     grand_tax = 0
     ri = 2
+    detail_rows = []
+    # 单次遍历：同时构建汇总数据和明细数据
     for corp, items in sorted(invoice_groups.items(), key=lambda x: -len(x[1])):
         total = round(sum(r["amount"] for r in items), 2)
         tax = round(total * 0.06, 2)
@@ -71,6 +73,14 @@ def invoice_gen(receivable_path: str, invoice_type: str = "普通发票") -> str
             if total > 10000:
                 c.fill = YELLOW_FILL
         ri += 1
+
+        # 同时收集明细数据，避免第二次遍历
+        for r in items:
+            amt = r["amount"]
+            dtax = round(amt * 0.06, 2)
+            dnet = round(amt - dtax, 2)
+            date_str = r["date"].strftime("%Y-%m-%d") if r["date"] else ""
+            detail_rows.append([corp, date_str, r["room"], amt, dtax, dnet, "住宿", r.get("remark", "")])
 
     # 合计行
     vals_sum = ["合计", sum(len(v) for v in invoice_groups.values()),
@@ -90,17 +100,9 @@ def invoice_gen(receivable_path: str, invoice_type: str = "普通发票") -> str
         c.font = HEADER_FONT
         c.border = THIN_BORDER
 
-    ri = 2
-    for corp, items in sorted(invoice_groups.items()):
-        for r in items:
-            amt = r["amount"]
-            tax = round(amt * 0.06, 2)
-            net = round(amt - tax, 2)
-            date_str = r["date"].strftime("%Y-%m-%d") if r["date"] else ""
-            vals = [corp, date_str, r["room"], amt, tax, net, "住宿", r.get("remark", "")]
-            for j, v in enumerate(vals, 1):
-                ws2.cell(row=ri, column=j, value=v).border = THIN_BORDER
-            ri += 1
+    for ri, vals in enumerate(detail_rows, start=2):
+        for j, v in enumerate(vals, 1):
+            ws2.cell(row=ri, column=j, value=v).border = THIN_BORDER
 
     wb.save(out_path)
     wb.close()
@@ -113,5 +115,3 @@ def invoice_gen(receivable_path: str, invoice_type: str = "普通发票") -> str
         f"总税额(6%): {grand_tax:,.2f}\n"
         f"不含税: {grand_total - grand_tax:,.2f}"
     )
-
-

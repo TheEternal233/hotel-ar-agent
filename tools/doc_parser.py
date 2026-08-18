@@ -15,13 +15,13 @@ import os
 import zipfile
 from datetime import datetime
 import openpyxl
-from langsmith.evaluation._runner import ET
+import xml.etree.ElementTree as ET
 
 
 def _open(path, sheet_name=None):
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
-    wb = openpyxl.load_workbook(path, data_only=True)
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     try:
         ws = wb[sheet_name] if sheet_name else wb.active
         return wb, ws
@@ -47,8 +47,13 @@ def _parse_date(val):
     return None
 
 
-def read_sheet(path, header_row=1, sheet_name=None, skip_empty=True, start_row=None):
-    wb, ws = _open(path, sheet_name)
+def read_sheet(path, header_row=1, sheet_name=None, skip_empty=True, start_row=None, wb=None):
+    close_wb = False
+    if wb is None:
+        wb, ws = _open(path, sheet_name)
+        close_wb = True
+    else:
+        ws = wb[sheet_name] if sheet_name else wb.active
     try:
         headers = _get_headers(ws, header_row)
         start = start_row or (header_row + 1)
@@ -60,7 +65,8 @@ def read_sheet(path, header_row=1, sheet_name=None, skip_empty=True, start_row=N
             rows.append(record)
         return headers, rows
     finally:
-        wb.close()
+        if close_wb:
+            wb.close()
 
 
 def read_indexed(path, key_column, header_row=1, sheet_name=None):
@@ -117,8 +123,13 @@ def read_mapped(path, column_map, header_row=1, sheet_name=None, cast=None):
         wb.close()
 
 
-def read_rezen(path, header_row=1, sheet_name=None):
-    wb, ws = _open(path, sheet_name)
+def read_rezen(path, header_row=1, sheet_name=None, wb=None):
+    close_wb = False
+    if wb is None:
+        wb, ws = _open(path, sheet_name)
+        close_wb = True
+    else:
+        ws = wb[sheet_name] if sheet_name else wb.active
     try:
         headers = _get_headers(ws, header_row)
         headers_lower = [h.lower() for h in headers]
@@ -189,7 +200,8 @@ def read_rezen(path, header_row=1, sheet_name=None):
             records.append(rec)
         return records
     finally:
-        wb.close()
+        if close_wb:
+            wb.close()
 
 
 def get_info(path, sheet_name=None):
@@ -358,12 +370,17 @@ CARD_MAPPING = {
     "card":   ["card", "卡号", "card_number", "card_no"],
 }
 
-def read_ota_channel(path, channel_name, sheet_name=None):
+def read_ota_channel(path, channel_name, sheet_name=None, wb=None):
     cfg = OTA_CHANNEL_MAPPINGS.get(channel_name)
     if not cfg:
         raise ValueError(f"Unknown channel: {channel_name}. Available: {list(OTA_CHANNEL_MAPPINGS.keys())}")
 
-    wb, ws = _open(path, sheet_name)
+    close_wb = False
+    if wb is None:
+        wb, ws = _open(path, sheet_name)
+        close_wb = True
+    else:
+        ws = wb[sheet_name] if sheet_name else wb.active
     try:
         hr = cfg["header_row"]
         headers = _get_headers(ws, hr)
@@ -394,7 +411,8 @@ def read_ota_channel(path, channel_name, sheet_name=None):
 
         return records
     finally:
-        wb.close()
+        if close_wb:
+            wb.close()
 
 
 def detect_ota_channel(path):
@@ -483,20 +501,11 @@ def _fast_read_xlsx_headers(path, max_rows=2):
     except Exception:
         return [], sheet_names
 
-def detect_ota_channel_fast(path):
-    """快速检测 OTA 渠道，不打开 openpyxl（用于批量对账前置判断）"""
-    rows, sheet_names = _fast_read_xlsx_headers(path, max_rows=2)
-    if not rows:
-        return None
+def _detect_ota_channel_from_headers(headers, sheet_names, rows):
+    """根据表头内容检测渠道"""
+    headers_str = " ".join(str(h) for h in headers if h)
 
-    headers = [str(h) for h in rows[0] if h]
-    headers_str = " ".join(headers)
-
-    rezen_markers = ["账单号", "外部订单号", "协议单位"]
-    rezen_score = sum(1 for m in rezen_markers if m in headers_str)
-    if rezen_score >= 2:
-        return "rezen"
-
+    # 优先检测 OTA 渠道（向蜜鸟有 rezen 标记，优先判断）
     if "财务总对账" in sheet_names and "PMS" in sheet_names:
         return "向蜜鸟"
 
@@ -517,5 +526,50 @@ def detect_ota_channel_fast(path):
             row2_str = " ".join(str(v) for v in rows[1] if v)
             if "订单号" in row2_str and "结算价" in row2_str:
                 return "携程客房"
+
+    # 最后检测 rezen（PMS 文件）
+    rezen_markers = ["账单号", "外部订单号", "协议单位"]
+    rezen_score = sum(1 for m in rezen_markers if m in headers_str)
+    if rezen_score >= 2:
+        return "rezen"
+
+    return None
+
+
+def detect_ota_channel_fast(path):
+    """快速检测 OTA 渠道，不打开 openpyxl（用于批量对账前置判断）
+
+    对于包含合并单元格等特殊格式的文件，会回退到 openpyxl 读取。
+    """
+    # 先尝试用 zipfile+xml 快速读取
+    rows, sheet_names = _fast_read_xlsx_headers(path, max_rows=3)
+    if rows:
+        headers = [str(h) for h in rows[0] if h]
+        # 如果快速读取到了有效表头，直接使用
+        if headers:
+            result = _detect_ota_channel_from_headers(headers, sheet_names, rows)
+            if result:
+                return result
+
+    # 快速读取失败或结果为空，回退到 openpyxl 完整读取
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        try:
+            ws = wb.active
+            sheet_names = [s.title for s in wb.worksheets]
+            # 尝试读取前3行，找到非空的表头行
+            rows = []
+            for row in ws.iter_rows(min_row=1, max_row=3, values_only=True):
+                rows.append([str(v) if v is not None else "" for v in row])
+            for row in rows:
+                headers = [h for h in row if h]
+                if headers:
+                    result = _detect_ota_channel_from_headers(headers, sheet_names, rows)
+                    if result:
+                        return result
+        finally:
+            wb.close()
+    except Exception:
+        pass
 
     return None

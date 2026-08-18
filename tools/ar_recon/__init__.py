@@ -41,13 +41,13 @@ def _process_single_channel(ota_path, pms_path, channel):
         finally:
             xmn_wb.close()
     elif channel in FNB_CHANNELS:
-        ota_records = read_ota_channel(ota_path, channel)
-        rezen_records = read_rezen(pms_path)
-        results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
-        # F&B 报告需要复制源文件 sheet，预加载 wb 避免重复读取
+        # 只加载一次 data_only=False，同时用于读取数据和复制源文件样式到报告
         ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
         pms_wb = openpyxl.load_workbook(pms_path, data_only=False)
         try:
+            ota_records = read_ota_channel(ota_path, channel, wb=ota_wb)
+            rezen_records = read_rezen(pms_path, wb=pms_wb)
+            results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
             report_path = _generate_ar_report_fnb(
                 results, stats, channel, ota_path, pms_path,
                 ota_wb=ota_wb, pms_wb=pms_wb,
@@ -56,15 +56,15 @@ def _process_single_channel(ota_path, pms_path, channel):
             ota_wb.close()
             pms_wb.close()
     else:
-        ota_records = read_ota_channel(ota_path, channel)
-        rezen_records = read_rezen(pms_path)
-        results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-        # A类报告需要PMS原始表头+行数据，提前读取避免 _generate_ar_report_a 内部重复加载
-        pms_headers, pms_raw_rows = read_sheet(pms_path)
-        # 同时预加载 wb 避免 _init_workbook 重复读取
+        # 只加载一次 data_only=False，同时用于读取数据和复制源文件样式到报告
         ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
         pms_wb = openpyxl.load_workbook(pms_path, data_only=False)
         try:
+            ota_records = read_ota_channel(ota_path, channel, wb=ota_wb)
+            rezen_records = read_rezen(pms_path, wb=pms_wb)
+            results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
+            # A类报告需要PMS原始表头+行数据，从已加载的 pms_wb 直接读取避免重复加载
+            pms_headers, pms_raw_rows = read_sheet(pms_path, wb=pms_wb)
             report_path = _generate_ar_report_a(
                 results, stats, channel, ota_path, pms_path,
                 pms_headers=pms_headers, pms_raw_rows=pms_raw_rows,

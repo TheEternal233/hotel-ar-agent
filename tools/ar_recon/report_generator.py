@@ -284,10 +284,12 @@ def _generate_ar_report_fnb(results, stats, channel_name, ota_path, pms_path,
 
 
 def _generate_ar_report_a(results, stats, channel_name, ota_path, pms_path,
-                           pms_headers=None, pms_raw_rows=None):
+                           pms_headers=None, pms_raw_rows=None,
+                           ota_wb=None, pms_wb=None):
     """A类渠道报告，前两个为PMS，OTA源文件，第三为PMS原表+差异字段，ota_only单独列出
 
     支持传入已读取的 pms_headers 和 pms_raw_rows，避免重复读取 PMS 文件。
+    支持传入已加载的 workbook 避免重复读取源文件。
     """
     out_path = _make_out_path(channel_name)
 
@@ -295,7 +297,8 @@ def _generate_ar_report_a(results, stats, channel_name, ota_path, pms_path,
     if pms_headers is None or pms_raw_rows is None:
         pms_headers, pms_raw_rows = read_sheet(pms_path)
 
-    wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path)
+    wb = _init_workbook(ar_mode=True, ota_path=ota_path, pms_path=pms_path,
+                        ota_wb=ota_wb, pms_wb=pms_wb)
 
     ws = wb.create_sheet(SHEET_SUMMARY)
 

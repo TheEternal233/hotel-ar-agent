@@ -120,6 +120,10 @@ def _analyze_pms_data(source_path: str, as_of_date: datetime) -> Dict[str, Any]:
                 grand_total[k] += data["amounts"].get(k, 0)
         grand_total["total"] += data["total"]
 
+    # 预计算 notice_month，避免调用方重复分析
+    notice_dates = [r.get("date") for r in raw_records if r.get("date") and r.get("type") == "借方"]
+    notice_month = max(notice_dates).strftime("%Y-%m") if notice_dates else datetime.now().strftime("%Y-%m")
+
     return {
         "as_of_date": as_of_date,
         "customer_count": len(customers),
@@ -127,6 +131,7 @@ def _analyze_pms_data(source_path: str, as_of_date: datetime) -> Dict[str, Any]:
         "customers": customers,
         "grand_total": grand_total,
         "raw_records": raw_records,  # 返回原始记录供后续复用，避免重复读取文件
+        "notice_month": notice_month,  # 预计算付款通知书月份，避免重复分析
     }
 
 
@@ -160,29 +165,33 @@ def _write_aging_report(result: Dict[str, Any], template_path: str, output_path:
         sorted_customers = sorted(customers.items(), key=lambda x: -x[1]["total"])
         data_start_row = 2
 
+        # 预计算需要高亮的账龄段索引，避免循环中重复判断
+        yellow_brackets = {"91-120", "121-150", "151-180"}
+
         for idx, (corp_name, data) in enumerate(sorted_customers):
             row_idx = data_start_row + idx
 
-            ws.cell(row=row_idx, column=1, value=data["account_no"])
-            ws.cell(row=row_idx, column=2, value=corp_name)
+            # 批量写入基础数据（账号、客户名）
+            ws.cell(row=row_idx, column=1, value=data["account_no"]).border = THIN_BORDER
+            ws.cell(row=row_idx, column=2, value=corp_name).border = THIN_BORDER
 
+            # 批量写入账龄段数据
             for col_offset, (_, bname, bkey) in enumerate(AGING_BRACKETS, start=3):
                 val = data["amounts"].get(bkey, 0)
                 cell = ws.cell(row=row_idx, column=col_offset, value=round(val, 2) if val else 0)
                 cell.border = THIN_BORDER
                 cell.number_format = '#,##0.00'
-                if bkey in ["91-120", "121-150", "151-180"] and val > 0:
-                    cell.fill = YELLOW_FILL
-                elif bkey == "180+" and val > 0:
-                    cell.fill = RED_FILL
+                if val > 0:
+                    if bkey in yellow_brackets:
+                        cell.fill = YELLOW_FILL
+                    elif bkey == "180+":
+                        cell.fill = RED_FILL
 
+            # 合计列
             total_cell = ws.cell(row=row_idx, column=10, value=round(data["total"], 2))
             total_cell.border = THIN_BORDER
             total_cell.number_format = '#,##0.00'
             total_cell.font = Font(bold=True)
-
-            for c in [1, 2]:
-                ws.cell(row=row_idx, column=c).border = THIN_BORDER
 
         # 更新Total行
         new_total_row = data_start_row + len(sorted_customers)
@@ -266,16 +275,10 @@ def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=F
     notice_result=""
     if generate_notice and os.path.exists(receivable_path):
         try:
-            # 复用 _analyze_pms_data 返回的原始记录，避免重复读取文件
-            raw_records = result.get("raw_records", [])
-            dates = [r.get("date") for r in raw_records if r.get("date") and r.get("type") == "借方"]
-            if dates:
-                notice_month = max(dates).strftime("%Y-%m")
-            else:
-                notice_month = datetime.now().strftime("%Y-%m")
+            # 复用 _analyze_pms_data 返回的 notice_month，避免重复计算
             notice_result = generate_payment_notices(
                 receivable_path=receivable_path,
-                notice_month=notice_month,
+                notice_month=result.get("notice_month", datetime.now().strftime("%Y-%m")),
             )
         except Exception as e:
             notice_result = f"付款通知书生成失败:{e}"
@@ -289,6 +292,11 @@ def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=F
         except Exception:
             pass
 
+    return _format_aging_result(result, output_path, as_of_date_dt, notice_result)
+
+
+def _format_aging_result(result: Dict[str, Any], output_path: str, as_of_date_dt: datetime, notice_result: str = "") -> str:
+    """格式化账龄分析结果为字符串（供 aging_analysis 和 aging_and_notice 复用）"""
     lines = [
         f"账龄分析完成: {output_path}",
         f"截止日期: {as_of_date_dt.strftime('%Y-%m-%d')}",
@@ -331,25 +339,26 @@ def aging_and_notice(
     先执行应收账龄分析，再基于同一数据源为各协议客户生成付款通知书。
     全部完成后统一删除源文件。
     """
-    aging_result = aging_analysis.invoke({
-        "receivable_path": receivable_path,
-        "as_of_date": as_of_date,
-        "keep_source": True,
-        "generate_notice": False,
-    })
-    if aging_result.startswith("错误"):
-        return aging_result
+    # 直接调用 _analyze_pms_data 一次，复用结果生成报告和付款通知书
+    # 避免通过 aging_analysis.invoke() 间接调用导致重复分析
+    if not os.path.exists(receivable_path):
+        return f"错误：源文件不存在 {receivable_path}"
+    if not os.path.exists(TEMPLATE_PATH):
+        return f"错误：模板文件不存在 {TEMPLATE_PATH}"
+
+    if not as_of_date:
+        as_of_date_dt = datetime.now()
+    else:
+        as_of_date_dt = _parse_date(as_of_date) or datetime.now()
+
+    result = _analyze_pms_data(receivable_path, as_of_date_dt)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    output_path = os.path.join(OUTPUT_DIR, f"应收账龄分析报表_{as_of_date_dt.strftime('%Y%m%d')}.xlsx")
+    _write_aging_report(result, TEMPLATE_PATH, output_path)
 
     if not notice_month:
-        # 复用 _analyze_pms_data 返回的原始记录计算 notice_month，避免重复读取文件
-        as_of_date_dt = _parse_date(as_of_date) or datetime.now()
-        result = _analyze_pms_data(receivable_path, as_of_date_dt)
-        raw_records = result.get("raw_records", [])
-        dates = [r.get("date") for r in raw_records if r.get("date") and r.get("type") == "借方"]
-        if dates:
-            notice_month = max(dates).strftime("%Y-%m")
-        else:
-            notice_month = datetime.now().strftime("%Y-%m")
+        notice_month = result.get("notice_month", datetime.now().strftime("%Y-%m"))
 
     notice_result = generate_payment_notices(
         receivable_path=receivable_path,
@@ -358,6 +367,8 @@ def aging_and_notice(
         notice_date=notice_date or None,
         due_date=due_date or None,
     )
+
+    aging_result = _format_aging_result(result, output_path, as_of_date_dt)
 
     try:
         if os.path.exists(receivable_path):

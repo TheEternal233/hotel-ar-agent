@@ -27,14 +27,15 @@ def _build_engine(mode: str) -> TaskEngine:
         ))
 
     elif mode == "monthly":
-        # 月度：OTA对账
+        # 月度：OTA对账（扫描 uploads 目录，完成后清理源文件）
+        ota_data_dir = str(UPLOAD_DIR)
         def _run_ota():
             mod = __import__("tools.ar_recon.batch_runner", fromlist=["batch_ota_recon"])
-            return mod.batch_ota_recon(os.path.join(BASE_DIR, "data", "清远", "OTA对账"))
+            return mod.batch_ota_recon(ota_data_dir, cleanup=True)
         engine.register(TaskDef(
             name="ota_recon",
             func=_run_ota,
-            required_paths=[os.path.join(BASE_DIR, "data", "清远", "OTA对账")],
+            required_paths=[ota_data_dir],
             priority=1,
         ))
 

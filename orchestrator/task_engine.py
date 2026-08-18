@@ -127,13 +127,14 @@ class TaskEngine:
                     else:
                         output=task.func()
                 else:
+                    # 轻量级同步任务直接执行，避免线程切换开销
                     if task.timeout>0:
                         output=await asyncio.wait_for(
-                            asyncio.get_event_loop().run_in_executor(self._executor, task.func),
+                            asyncio.to_thread(task.func),
                             timeout=task.timeout
                         )
                     else:
-                        output=await asyncio.get_event_loop().run_in_executor(self._executor, task.func)
+                        output=task.func()
 
                 # 成功，返回结果
                 duration=int((datetime.now() - start).total_seconds() * 1000)

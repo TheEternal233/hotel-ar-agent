@@ -49,7 +49,7 @@ def data_integration(action: str, source_path: str = "") -> str:
         ext = os.path.splitext(source_path)[1].lower()
         if ext in (".xlsx",".xls"):
             import openpyxl
-            wb = openpyxl.load_workbook(source_path)
+            wb = openpyxl.load_workbook(source_path, data_only=True, read_only=True)
             try:
                 ws = wb.active
                 headers = [c.value for c in next(ws.iter_rows(min_row=1,max_row=1))]

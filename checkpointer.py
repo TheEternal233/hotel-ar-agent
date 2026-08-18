@@ -124,10 +124,21 @@ class JsonFileSaver(BaseCheckpointSaver):
             return obj.__dict__
         return str(obj)
 
+    @staticmethod
+    def _pack_key(*parts) -> str:
+        """将元组键打包为字符串，避免 ast.literal_eval 开销"""
+        return "\x00".join(str(p) for p in parts)
+
+    @staticmethod
+    def _unpack_key(key_str: str) -> tuple:
+        """将字符串键解包为元组"""
+        return tuple(key_str.split("\x00"))
+
     def _deserialize_storage(self, data: dict) -> dict:
         """将 JSON 数据反序列化为内部存储结构
 
         serde.dumps_typed 返回 (type_name, bytes) 元组，需要分别还原。
+        使用 \x00 分隔的字符串键替代 str(tuple) + ast.literal_eval，减少 CPU 开销。
         """
         result = {
             "storage": defaultdict(lambda: defaultdict(dict)),
@@ -145,17 +156,15 @@ class JsonFileSaver(BaseCheckpointSaver):
                     )
         # writes: (thread_id, checkpoint_ns, checkpoint_id) -> (task_id, idx) -> (task_id, channel, (type_name, bytes), task_path)
         for key_str, writes in data.get("writes", {}).items():
-            key = ast.literal_eval(key_str)
-            tid, ns, cp_id = key
+            tid, ns, cp_id = self._unpack_key(key_str)
             for inner_key_str, (tid_w, ch, val_list, tpath) in writes.items():
-                inner_key = ast.literal_eval(inner_key_str)
-                result["writes"][(tid, ns, cp_id)][inner_key] = (
+                task_id, idx = self._unpack_key(inner_key_str)
+                result["writes"][(tid, ns, cp_id)][(task_id, int(idx))] = (
                     tid_w, ch, (val_list[0], self._from_b64(val_list[1])), tpath
                 )
         # blobs: (thread_id, checkpoint_ns, channel, version) -> (type, bytes)
         for key_str, (typ, val_b64) in data.get("blobs", {}).items():
-            key = ast.literal_eval(key_str)
-            tid, ns, ch, ver = key
+            tid, ns, ch, ver = self._unpack_key(key_str)
             result["blobs"][(tid, ns, ch, ver)] = (typ, self._from_b64(val_b64))
         return result
 
@@ -163,6 +172,7 @@ class JsonFileSaver(BaseCheckpointSaver):
         """将内部存储结构序列化为 JSON 可存储格式
 
         serde.dumps_typed 返回 (type_name, bytes) 元组，需要分别序列化。
+        使用 \x00 分隔的字符串键替代 str(tuple)，减少序列化开销。
         """
         result = {"storage": {}, "writes": {}, "blobs": {}}
         for tid, ns_data in data["storage"].items():
@@ -178,14 +188,16 @@ class JsonFileSaver(BaseCheckpointSaver):
                     ]
         for key, writes in data["writes"].items():
             tid, ns, cp_id = key
-            result["writes"][str((tid, ns, cp_id))] = {}
+            outer_key = self._pack_key(tid, ns, cp_id)
+            result["writes"][outer_key] = {}
             for (task_id, idx), (tid_w, ch, val_tuple, tpath) in writes.items():
-                result["writes"][str((tid, ns, cp_id))][str((task_id, idx))] = [
+                inner_key = self._pack_key(task_id, idx)
+                result["writes"][outer_key][inner_key] = [
                     tid_w, ch, [val_tuple[0], self._to_b64(val_tuple[1])], tpath
                 ]
         for key, (typ, val_bytes) in data["blobs"].items():
             tid, ns, ch, ver = key
-            result["blobs"][str((tid, ns, ch, ver))] = [typ, self._to_b64(val_bytes)]
+            result["blobs"][self._pack_key(tid, ns, ch, ver)] = [typ, self._to_b64(val_bytes)]
         return result
 
     @staticmethod

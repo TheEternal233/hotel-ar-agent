@@ -1,13 +1,17 @@
 import os
 import json
-import requests
 from dotenv import load_dotenv
 from langchain.tools import tool
 
 load_dotenv()
 
+# 延迟导入 httpx，避免模块加载时产生副作用
+def _get_httpx_client():
+    import httpx
+    return httpx.AsyncClient(timeout=30)
+
 @tool
-def bocha_search(query: str) -> str:
+async def bocha_search(query: str) -> str:
     """使用 Bocha 搜索 API 进行网络检索，返回搜索结果摘要和详细列表。
     适用于需要实时信息、新闻、事实查询或任何网络公开资料的场景。"""
     API_KEY = os.environ.get("BOCHA_API_KEY")
@@ -27,8 +31,9 @@ def bocha_search(query: str) -> str:
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        data = response.json()
+        async with _get_httpx_client() as client:
+            response = await client.post(url, headers=headers, json=payload)
+            data = response.json()
 
         if response.status_code != 200:
             return f"搜索失败：{json.dumps(data, ensure_ascii=False)}"

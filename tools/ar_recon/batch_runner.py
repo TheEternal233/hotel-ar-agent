@@ -18,7 +18,8 @@ from tools.ar_recon.constants import (
 )
 
 # 批量对账最大并行工作线程数
-BATCH_MAX_WORKERS = min(os.cpu_count() or 4, 4)
+# Excel 读取是 I/O 密集型任务，线程数可适当提高
+BATCH_MAX_WORKERS = min((os.cpu_count() or 4) * 2, 8)
 
 def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
     """处理单个渠道（用于线程池并行）"""
@@ -51,10 +52,14 @@ def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
 
     ota_clean = re.sub(r'[0-9]+$', '', ota_base).strip()
     matched_rezen = None
+
+    # 第一轮：精确匹配（ota_clean 和 rf_clean 互相包含）
     for rf_clean, rf in rezen_lookup.items():
-        if ota_clean in rf_clean or rf_clean in ota_clean or ota_clean[:2] in rf_clean:
+        if ota_clean == rf_clean or ota_clean in rf_clean or rf_clean in ota_clean:
             matched_rezen = rf
             break
+
+    # 第二轮：前缀匹配（要求 ota_base 前3个字符在 rezen 文件名中，且不是仅前2个字的模糊匹配）
     if matched_rezen is None:
         for rf in rezen_files:
             rf_base = os.path.splitext(rf)[0]
@@ -66,15 +71,20 @@ def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
     rezen_path = os.path.join(data_dir, matched_rezen)
 
     try:
-        ota_records = read_ota_channel(ota_path, channel)
-        rezen_records = read_rezen(rezen_path)
+        # 只加载一次 data_only=False，同时用于读取数据和复制源文件样式到报告
+        ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        pms_wb = openpyxl.load_workbook(rezen_path, data_only=False)
+        ota_records = read_ota_channel(ota_path, channel, wb=ota_wb)
+        rezen_records = read_rezen(rezen_path, wb=pms_wb)
     except Exception as e:
         return f"{channel}({ota_file}): 读取失败 - {e}"
 
     if channel in FNB_CHANNELS:
         results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
-        ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
-        pms_wb = openpyxl.load_workbook(rezen_path, data_only=False)
+    else:
+        results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
+
+    if channel in FNB_CHANNELS:
         try:
             report_path = _generate_ar_report_fnb(
                 results, stats, channel, ota_path, rezen_path,
@@ -84,10 +94,8 @@ def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
             ota_wb.close()
             pms_wb.close()
     else:
-        results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-        pms_headers, pms_raw_rows = read_sheet(rezen_path)
-        ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
-        pms_wb = openpyxl.load_workbook(rezen_path, data_only=False)
+        # A类报告需要PMS原始表头+行数据，从已加载的 pms_wb 直接读取避免重复加载
+        pms_headers, pms_raw_rows = read_sheet(rezen_path, wb=pms_wb)
         try:
             report_path = _generate_ar_report_a(
                 results, stats, channel, ota_path, rezen_path,
@@ -105,7 +113,7 @@ def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
     }
 
 
-def batch_ota_recon(data_dir=None):
+def batch_ota_recon(data_dir=None, cleanup: bool = False):
     if data_dir is None:
         data_dir = os.path.join(BASE_DIR, *DEFAULT_DATA_SUBDIR)
     if not os.path.exists(data_dir):
@@ -117,6 +125,7 @@ def batch_ota_recon(data_dir=None):
 
     all_stats = []
     all_reports = []
+    used_files = set()
 
     # Build rezen lookup by channel name
     rezen_lookup = {}
@@ -140,6 +149,14 @@ def batch_ota_recon(data_dir=None):
             else:
                 all_stats.append(result)
                 all_reports.append(result["report"])
+                used_files.add(result["file"])
+                # 记录匹配的 rezen 文件（使用与上面相同的精确匹配逻辑）
+                ota_base = os.path.splitext(result["file"])[0]
+                ota_clean = re.sub(r'[0-9]+$', '', ota_base).strip()
+                for rf_clean, rf in rezen_lookup.items():
+                    if ota_clean == rf_clean or ota_clean in rf_clean or rf_clean in ota_clean:
+                        used_files.add(rf)
+                        break
 
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     ota_dir = os.path.join(OUT_DIR, OTA_RECON_DIR)
@@ -171,6 +188,18 @@ def batch_ota_recon(data_dir=None):
     wb.save(summary_path)
     wb.close()
 
+    # 清理已使用的源文件
+    deleted = []
+    if cleanup:
+        for f in used_files:
+            fp = os.path.join(data_dir, f)
+            try:
+                if os.path.exists(fp):
+                    os.remove(fp)
+                    deleted.append(f)
+            except OSError:
+                pass
+
     total_match = sum(s["stats"]["match"] for s in all_stats if isinstance(s, dict))
     total_diff = sum(s["stats"]["diff"] for s in all_stats if isinstance(s, dict))
     total_ota_only = sum(s["stats"]["ota_only"] for s in all_stats if isinstance(s, dict))
@@ -186,10 +215,13 @@ def batch_ota_recon(data_dir=None):
             f"  {s['channel']}: 匹配{st['match']} 差异{st['diff']} 仅OTA{st['ota_only']} 仅PMS{st['pms_only']}"
         )
 
-    return (
+    result_msg = (
         f"OTA批量对账完成\n"
         f"渠道数: {len([s for s in all_stats if isinstance(s, dict)])}\n"
         f"匹配: {total_match}  差异: {total_diff}  仅OTA: {total_ota_only}  仅PMS: {total_pms_only}\n"
         f"汇总报告: {summary_path}\n\n"
         f"各渠道明细:\n" + "\n".join(channel_lines)
     )
+    if cleanup and deleted:
+        result_msg += f"\n\n已清理文件: {', '.join(deleted)}"
+    return result_msg
