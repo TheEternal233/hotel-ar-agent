@@ -1,5 +1,6 @@
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import openpyxl
@@ -16,6 +17,94 @@ from tools.ar_recon.constants import (
     OTA_RECON_DIR,
 )
 
+# 批量对账最大并行工作线程数
+BATCH_MAX_WORKERS = min(os.cpu_count() or 4, 4)
+
+def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
+    """处理单个渠道（用于线程池并行）"""
+    ota_path = os.path.join(data_dir, ota_file)
+    ota_base = os.path.splitext(ota_file)[0]
+    channel = detect_ota_channel_fast(ota_path)
+    if channel is None or channel == PMS_MARKER:
+        return None
+
+    if channel == "向蜜鸟":
+        try:
+            ota_records, card_records, rezen_records = read_xiangminiao(ota_path)
+        except Exception as e:
+            return f"向蜜鸟({ota_file}): 读取失败 - {e}"
+        results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
+        xmn_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        try:
+            report_path = _generate_ar_report(
+                results, stats, channel, ota_path, ota_path,
+                ota_wb=xmn_wb, pms_wb=xmn_wb,
+            )
+        finally:
+            xmn_wb.close()
+        return {
+            "channel": channel,
+            "file": ota_file,
+            "stats": stats,
+            "report": report_path,
+        }
+
+    ota_clean = re.sub(r'[0-9]+$', '', ota_base).strip()
+    matched_rezen = None
+    for rf_clean, rf in rezen_lookup.items():
+        if ota_clean in rf_clean or rf_clean in ota_clean or ota_clean[:2] in rf_clean:
+            matched_rezen = rf
+            break
+    if matched_rezen is None:
+        for rf in rezen_files:
+            rf_base = os.path.splitext(rf)[0]
+            if ota_base[:PREFIX_MATCH_LEN] in rf_base and PMS_MARKER in rf_base.lower():
+                matched_rezen = rf
+                break
+    if matched_rezen is None:
+        return None
+    rezen_path = os.path.join(data_dir, matched_rezen)
+
+    try:
+        ota_records = read_ota_channel(ota_path, channel)
+        rezen_records = read_rezen(rezen_path)
+    except Exception as e:
+        return f"{channel}({ota_file}): 读取失败 - {e}"
+
+    if channel in FNB_CHANNELS:
+        results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
+        ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        pms_wb = openpyxl.load_workbook(rezen_path, data_only=False)
+        try:
+            report_path = _generate_ar_report_fnb(
+                results, stats, channel, ota_path, rezen_path,
+                ota_wb=ota_wb, pms_wb=pms_wb,
+            )
+        finally:
+            ota_wb.close()
+            pms_wb.close()
+    else:
+        results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
+        pms_headers, pms_raw_rows = read_sheet(rezen_path)
+        ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        pms_wb = openpyxl.load_workbook(rezen_path, data_only=False)
+        try:
+            report_path = _generate_ar_report_a(
+                results, stats, channel, ota_path, rezen_path,
+                pms_headers=pms_headers, pms_raw_rows=pms_raw_rows,
+                ota_wb=ota_wb, pms_wb=pms_wb,
+            )
+        finally:
+            ota_wb.close()
+            pms_wb.close()
+    return {
+        "channel": channel,
+        "file": ota_file,
+        "stats": stats,
+        "report": report_path,
+    }
+
+
 def batch_ota_recon(data_dir=None):
     if data_dir is None:
         data_dir = os.path.join(BASE_DIR, *DEFAULT_DATA_SUBDIR)
@@ -30,89 +119,27 @@ def batch_ota_recon(data_dir=None):
     all_reports = []
 
     # Build rezen lookup by channel name
-    # 将PMS文件名写成渠道名，方便配对
     rezen_lookup = {}
     for rf in rezen_files:
-        rf_base = os.path.splitext(rf)[0]   #去掉.xlsx
+        rf_base = os.path.splitext(rf)[0]
         rf_clean = rf_base.replace(PMS_MARKER, "").replace("·", "").rstrip("0123456789")
         rezen_lookup[rf_clean] = rf
 
-    for ota_file in ota_files:
-        ota_path = os.path.join(data_dir, ota_file)
-        ota_base = os.path.splitext(ota_file)[0]
-        # Strip trailing digits for files like 飞猪1, 飞猪2
-        channel = detect_ota_channel_fast(ota_path)
-        if channel is None or channel == PMS_MARKER:
-            continue
-
-        if channel == "向蜜鸟":
-            try:
-                ota_records, card_records, rezen_records = read_xiangminiao(ota_path)
-            except Exception as e:
-                all_stats.append(f"向蜜鸟({ota_file}): 读取失败 - {e}")
+    # 使用线程池并行处理各渠道（渠道之间无依赖）
+    with ThreadPoolExecutor(max_workers=BATCH_MAX_WORKERS) as executor:
+        future_to_file = {
+            executor.submit(_process_one_channel, data_dir, ota_file, rezen_lookup, rezen_files): ota_file
+            for ota_file in ota_files
+        }
+        for future in as_completed(future_to_file):
+            result = future.result()
+            if result is None:
                 continue
-            results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
-            # 向蜜鸟 ota_path == pms_path，提前加载 wb 避免 _init_workbook 重复读取同一文件
-            xmn_wb = openpyxl.load_workbook(ota_path, data_only=False)
-            try:
-                report_path = _generate_ar_report(
-                    results, stats, channel, ota_path, ota_path,
-                    ota_wb=xmn_wb, pms_wb=xmn_wb,
-                )
-            finally:
-                xmn_wb.close()
-            all_stats.append({
-                "channel": channel,
-                "file": ota_file,
-                "stats": stats,
-                "report": report_path,
-            })
-            all_reports.append(report_path)
-            continue    #跳过后续文件配对逻辑，因为向蜜鸟单个文件，不需要找rezen配对文件
-
-        ota_clean = re.sub(r'[0-9]+$', '', ota_base).strip()
-        matched_rezen = None
-        for rf_clean, rf in rezen_lookup.items():
-            if ota_clean in rf_clean or rf_clean in ota_clean or ota_clean[:2] in rf_clean:
-                matched_rezen = rf
-                break
-        if matched_rezen is None:
-            # Try exact prefix match
-            for rf in rezen_files:
-                rf_base = os.path.splitext(rf)[0]
-                if ota_base[:PREFIX_MATCH_LEN] in rf_base and PMS_MARKER in rf_base.lower():
-                    matched_rezen = rf
-                    break
-        if matched_rezen is None:
-            continue
-        rezen_path = os.path.join(data_dir, matched_rezen)
-
-        try:
-            ota_records = read_ota_channel(ota_path, channel)
-            rezen_records = read_rezen(rezen_path)
-        except Exception as e:
-            all_stats.append(f"{channel}({ota_file}): 读取失败 - {e}")
-            continue
-
-        # 餐饮渠道走数量统计匹配，其他渠道走订单号匹配
-        if channel in FNB_CHANNELS:
-            results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
-            report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, rezen_path)
-        else:
-            results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-            # A类报告需要PMS原始表头+行数据，提前读取避免 _generate_ar_report_a 内部重复加载
-            pms_headers, pms_raw_rows = read_sheet(rezen_path)
-            report_path = _generate_ar_report_a(
-                results, stats, channel, ota_path, rezen_path,
-                pms_headers=pms_headers, pms_raw_rows=pms_raw_rows,
-            )
-        all_stats.append({
-            "channel": channel,
-            "file": ota_file,
-            "stats": stats,
-            "report": report_path,
-        })
-        all_reports.append(report_path)
+            if isinstance(result, str):
+                all_stats.append(result)
+            else:
+                all_stats.append(result)
+                all_reports.append(result["report"])
 
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     ota_dir = os.path.join(OUT_DIR, OTA_RECON_DIR)

@@ -52,7 +52,11 @@ def _get_bracket_key(days: int) -> str:
     return "180+"
 
 def _analyze_pms_data(source_path: str, as_of_date: datetime) -> Dict[str, Any]:
-    """对PMS应收账务列表进行账龄分析（内部核心逻辑）"""
+    """对PMS应收账务列表进行账龄分析（内部核心逻辑）
+
+    Returns:
+        包含账龄分析结果的字典，同时通过 'raw_records' 键返回原始记录供复用
+    """
     raw_records = read_pms_receivable(source_path)
 
     valid_records = []
@@ -122,6 +126,7 @@ def _analyze_pms_data(source_path: str, as_of_date: datetime) -> Dict[str, Any]:
         "total_amount": grand_total["total"],
         "customers": customers,
         "grand_total": grand_total,
+        "raw_records": raw_records,  # 返回原始记录供后续复用，避免重复读取文件
     }
 
 
@@ -261,18 +266,19 @@ def aging_analysis(receivable_path: str, as_of_date: str = "",keep_source:bool=F
     notice_result=""
     if generate_notice and os.path.exists(receivable_path):
         try:
-            row_records=read_pms_receivable(receivable_path)
-            dates=[r.get("date") for r in row_records if r.get("date") and r.get("type")=="借方"]
+            # 复用 _analyze_pms_data 返回的原始记录，避免重复读取文件
+            raw_records = result.get("raw_records", [])
+            dates = [r.get("date") for r in raw_records if r.get("date") and r.get("type") == "借方"]
             if dates:
-                notice_month=max(dates).strftime("%Y-%m")
+                notice_month = max(dates).strftime("%Y-%m")
             else:
-                notice_month=datetime.now().strftime("%Y-%m")
-            notice_result=generate_payment_notices(
+                notice_month = datetime.now().strftime("%Y-%m")
+            notice_result = generate_payment_notices(
                 receivable_path=receivable_path,
                 notice_month=notice_month,
             )
         except Exception as e:
-            notice_result=f"付款通知书生成失败:{e}"
+            notice_result = f"付款通知书生成失败:{e}"
 
     if not keep_source:
         try:
@@ -335,7 +341,10 @@ def aging_and_notice(
         return aging_result
 
     if not notice_month:
-        raw_records = read_pms_receivable(receivable_path)
+        # 复用 _analyze_pms_data 返回的原始记录计算 notice_month，避免重复读取文件
+        as_of_date_dt = _parse_date(as_of_date) or datetime.now()
+        result = _analyze_pms_data(receivable_path, as_of_date_dt)
+        raw_records = result.get("raw_records", [])
         dates = [r.get("date") for r in raw_records if r.get("date") and r.get("type") == "借方"]
         if dates:
             notice_month = max(dates).strftime("%Y-%m")

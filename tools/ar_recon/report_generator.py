@@ -81,8 +81,9 @@ def _write_section_title(ws, row, title):
 
 
 def _write_headers(ws, row, headers):
-    for j, h in enumerate(headers, 1):
-        c = ws.cell(row=row, column=j, value=h)
+    ws.append(headers)
+    for j in range(1, len(headers) + 1):
+        c = ws.cell(row=row, column=j)
         c.fill = HEADER_FILL
         c.font = HEADER_FONT
         c.border = THIN_BORDER
@@ -101,14 +102,18 @@ def _apply_status_color(cell, status):
 def _write_data_rows(ws, start_row, results, cols_fn, skip_match=False):
     """通用数据行写入，按状态着色，返回下一行号"""
     row = start_row
+    written = []  # 记录实际写入的 (row_index, status)
     for r in results:
         if skip_match and r["status"] == STATUS_MATCH:
             continue
-        for j, v in enumerate(cols_fn(r), 1):
-            c = ws.cell(row=row, column=j, value=v)
-            c.border = THIN_BORDER
-            _apply_status_color(c, r["status"])
+        ws.append(cols_fn(r))
+        written.append((row, r["status"]))
         row += 1
+    # 批量设置样式
+    for r_idx, status in written:
+        for c in ws[r_idx]:
+            c.border = THIN_BORDER
+            _apply_status_color(c, status)
     return row
 
 
@@ -323,21 +328,24 @@ def _generate_ar_report_a(results, stats, channel_name, ota_path, pms_path,
     _STATUS_ORDER = {STATUS_MATCH: 0, STATUS_DIFF: 1, STATUS_PMS_ONLY: 2, STATUS_OTA_ONLY: 3}
     sorted_results = sorted(results, key=lambda r: _STATUS_ORDER.get(r["status"], 9))
     row_idx = 2
+    written = []
     for r in sorted_results:
         pms = r.get("pms")
+        raw_row = {}
         if pms:
             bid = pms.get("bill_id", "")
             raw_row = bill_to_row.get(bid, {})
-            for j, h in enumerate(pms_headers, 1):
-                c = ws.cell(row=row_idx, column=j, value=raw_row.get(h))
-                c.border = THIN_BORDER
 
-        diff_vals = [r["status"], r.get("ota_order", ""), r.get("ota_amount", 0), r.get("diff", 0), ""]
-
-        for j, v in enumerate(diff_vals, n_pms + 1):
-            c = ws.cell(row=row_idx, column=j, value=v)
-            c.border = THIN_BORDER
-            _apply_status_color(c, r["status"])
+        row_data = [raw_row.get(h) for h in pms_headers]
+        row_data += [r["status"], r.get("ota_order", ""), r.get("ota_amount", 0), r.get("diff", 0), ""]
+        ws.append(row_data)
+        written.append((row_idx, r["status"]))
         row_idx += 1
+
+    # 批量设置样式
+    for r_idx, status in written:
+        for c in ws[r_idx]:
+            c.border = THIN_BORDER
+            _apply_status_color(c, status)
 
     return _save_and_close(wb, out_path)

@@ -4,6 +4,7 @@ import os
 import asyncio
 import logging
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Callable, Awaitable
 from dataclasses import dataclass, field
@@ -12,6 +13,9 @@ from enums.paths import BASE_DIR, UPLOAD_DIR
 from deps import logger
 
 logger = logging.getLogger(__name__)
+
+# 默认线程池大小：CPU 核心数 + 2，避免 Excel 等 IO 密集型任务耗尽资源
+DEFAULT_EXECUTOR_MAX_WORKERS = min(os.cpu_count() or 4, 8)
 
 @dataclass
 class TaskResult:
@@ -46,10 +50,15 @@ class TaskDef:
 class TaskEngine:
     """智能任务发现 + 拓扑排序 + 并行执行"""
 
-    def __init__(self,run_id:str=""):
+    def __init__(self, run_id: str = "", max_workers: int = None):
         self.tasks: dict[str, TaskDef] = {}
         self.results: dict[str, TaskResult] = {}
         self.run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+        # 有界线程池，避免默认线程池无界导致资源耗尽
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_workers or DEFAULT_EXECUTOR_MAX_WORKERS,
+            thread_name_prefix="task_engine"
+        )
 
 
     def register(self, task: TaskDef):
@@ -118,11 +127,13 @@ class TaskEngine:
                     else:
                         output=task.func()
                 else:
-                    loop=asyncio.get_event_loop()
                     if task.timeout>0:
-                        output=await asyncio.wait_for(loop.run_in_executor(None, task.func), timeout=task.timeout)
+                        output=await asyncio.wait_for(
+                            asyncio.get_event_loop().run_in_executor(self._executor, task.func),
+                            timeout=task.timeout
+                        )
                     else:
-                        output=await loop.run_in_executor(None,task.func)
+                        output=await asyncio.get_event_loop().run_in_executor(self._executor, task.func)
 
                 # 成功，返回结果
                 duration=int((datetime.now() - start).total_seconds() * 1000)
@@ -220,3 +231,7 @@ class TaskEngine:
                 all_results.append(r)
 
         return all_results
+
+    def shutdown(self):
+        """关闭线程池，释放资源"""
+        self._executor.shutdown(wait=True)

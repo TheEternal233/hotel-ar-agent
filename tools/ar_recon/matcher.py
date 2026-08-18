@@ -1,3 +1,4 @@
+import bisect
 from collections import defaultdict
 
 from tools.ar_recon.constants import (
@@ -35,9 +36,12 @@ def _build_pms_identify_index(pms_list):
             key 为完整的 ext_order / order 字符串，value 为索引列表
         amount_index: dict[int, list[int]]
             key 为金额(分)，value 为索引列表
+        sorted_amounts: list[tuple[int, int]]
+            按金额(分)排序的 (amount_key, index) 列表，用于 bisect 范围查询
     """
     identify_index = defaultdict(list)
     amount_index = defaultdict(list)
+    sorted_amounts = []  # (amount_key, index)
 
     for i, p in enumerate(pms_list):
         ext = _norm_orderno(p.get("ext_order", ""))
@@ -52,8 +56,10 @@ def _build_pms_identify_index(pms_list):
         if amt > 0:
             key = int(round(amt * 100))
             amount_index[key].append(i)
+            sorted_amounts.append((key, i))
 
-    return identify_index, amount_index
+    sorted_amounts.sort(key=lambda x: x[0])
+    return identify_index, amount_index, sorted_amounts
 
 
 # =====================================================================
@@ -80,13 +86,13 @@ def _match_by_order_id(oid, amt, pms_list, by_ext, by_order, used, amount_tol=AM
 
 
 def _match_by_identify_fast(identify, amt, pms_list, used,
-                            identify_index, amount_index,
+                            identify_index, amount_index, sorted_amounts,
                             amount_tol=AMOUNT_TOLERANCE):
     """按 identify_no 模糊匹配（索引加速版）
 
     策略：
         1. 精确匹配：identify 作为完整 key 查索引
-        2. Fallback：在金额相近的记录中做子串匹配
+        2. Fallback：在金额相近的记录中做子串匹配（bisect 范围查询替代逐 key 扫描）
     """
     if not identify:
         return -1
@@ -106,17 +112,19 @@ def _match_by_identify_fast(identify, amt, pms_list, used,
         return ci
 
     # --- 第三轮：金额相近记录中子串匹配 ---
-    # 只在金额容差范围内的记录中搜索，避免全表扫描
+    # 使用 bisect 在有序金额列表上做范围查询，替代逐 key 扫描
     amt_key = int(round(amt * 100))
     max_diff_key = int(round(MAX_AMOUNT_DIFF * 100))
+    lo_key = amt_key - max_diff_key
+    hi_key = amt_key + max_diff_key
 
-    nearby_candidates = []
-    for delta in range(-max_diff_key, max_diff_key + 1):
-        nearby_candidates.extend(amount_index.get(amt_key + delta, []))
+    # bisect 找到范围边界
+    lo = bisect.bisect_left(sorted_amounts, (lo_key, -1))
+    hi = bisect.bisect_right(sorted_amounts, (hi_key, float('inf')))
 
     # 去重保持顺序
     seen = set()
-    for ci in nearby_candidates:
+    for _, ci in sorted_amounts[lo:hi]:
         if ci in seen or ci in used:
             continue
         seen.add(ci)
@@ -127,7 +135,7 @@ def _match_by_identify_fast(identify, amt, pms_list, used,
                 return ci
 
     # --- 第四轮：子串匹配，不要求金额一致 ---
-    for ci in nearby_candidates:
+    for _, ci in sorted_amounts[lo:hi]:
         if ci in used:
             continue
         ext = _norm_orderno(pms_list[ci].get("ext_order", ""))
@@ -138,27 +146,35 @@ def _match_by_identify_fast(identify, amt, pms_list, used,
     return -1
 
 
-def _match_by_amount_fast(amt, pms_list, used, amount_index, max_diff=MAX_AMOUNT_DIFF):
-    """无订单号时按金额模糊匹配（索引加速版）"""
+def _match_by_amount_fast(amt, pms_list, used, amount_index, sorted_amounts, max_diff=MAX_AMOUNT_DIFF):
+    """无订单号时按金额模糊匹配（索引加速版）
+
+    使用 bisect 在有序金额列表上做范围查询，替代逐 key 扫描。
+    """
     if amt <= 0:
         return -1
 
     target_key = int(round(amt * 100))
     max_diff_key = int(round(max_diff * 100))
+    lo_key = target_key - max_diff_key
+    hi_key = target_key + max_diff_key
+
+    # bisect 找到范围边界
+    lo = bisect.bisect_left(sorted_amounts, (lo_key, -1))
+    hi = bisect.bisect_right(sorted_amounts, (hi_key, float('inf')))
 
     best_i, best_d = -1, float("inf")
 
-    for delta in range(-max_diff_key, max_diff_key + 1):
-        for ci in amount_index.get(target_key + delta, []):
-            if ci in used:
-                continue
-            pms_amt = _norm_amount(pms_list[ci].get("amount", 0))
-            if pms_amt <= 0:
-                continue
-            d = abs(amt - pms_amt)
-            if d < max_diff and d < best_d:
-                best_d = d
-                best_i = ci
+    for _, ci in sorted_amounts[lo:hi]:
+        if ci in used:
+            continue
+        pms_amt = _norm_amount(pms_list[ci].get("amount", 0))
+        if pms_amt <= 0:
+            continue
+        d = abs(amt - pms_amt)
+        if d < max_diff and d < best_d:
+            best_d = d
+            best_i = ci
 
     return best_i
 
@@ -226,7 +242,7 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
     amt_col = oci.get("amount_col", "amount")
 
     rezen_by_ext, rezen_by_order = _build_pms_order_index(rezen_records)
-    _, rezen_amount_index = _build_pms_identify_index(rezen_records)
+    _, rezen_amount_index, rezen_sorted_amounts = _build_pms_identify_index(rezen_records)
     rezen_matched = set()
     results = []
 
@@ -239,7 +255,7 @@ def _match_ota_rezen(ota_records, rezen_records, channel_name):
 
         if ri < 0 and not oid and oamt > 0:
             # 没有订单号、也没有识别号，只能靠金额。
-            ri = _match_by_amount_fast(oamt, rezen_records, rezen_matched, rezen_amount_index)
+            ri = _match_by_amount_fast(oamt, rezen_records, rezen_matched, rezen_amount_index, rezen_sorted_amounts)
 
         if ri >= 0:
             # 匹配成功->比较金额
@@ -268,17 +284,14 @@ def _match_ota_rezen_fnb(ota_records, rezen_records, channel_name):
     pms_counts, pms_bills, pms_total = _build_amount_counter(rezen_records, "amount", "bill_no")
 
     # 收集所有金额，按容差确定统一基准
+    # O(n log n) 排序后线性扫描合并，替代原 O(n²) 的逐组比较
     all_amounts = sorted(set(ota_counts.keys()) | set(pms_counts.keys()))
     price_groups = []  # [(基准价格, [相近价格列表]), ...]
 
     for amt in all_amounts:
-        merged = False
-        for base, members in price_groups:
-            if abs(amt - base) < AMOUNT_TOLERANCE:
-                members.append(amt)
-                merged = True
-                break
-        if not merged:
+        if price_groups and abs(amt - price_groups[-1][0]) < AMOUNT_TOLERANCE:
+            price_groups[-1][1].append(amt)
+        else:
             price_groups.append((amt, [amt]))
 
     results = []
@@ -338,7 +351,7 @@ def _match_ota_rezen_fnb(ota_records, rezen_records, channel_name):
 def match_xiangminiao(ota_list, pms_list, card_list=None):
     # 一次性构建所有索引（O(m) 预处理）
     pms_by_ext, pms_by_order = _build_pms_order_index(pms_list)
-    pms_identify_index, pms_amount_index = _build_pms_identify_index(pms_list)
+    pms_identify_index, pms_amount_index, pms_sorted_amounts = _build_pms_identify_index(pms_list)
 
     card_map = {}
     if card_list:
@@ -375,11 +388,11 @@ def match_xiangminiao(ota_list, pms_list, card_list=None):
         if idx < 0 and identify:
             idx = _match_by_identify_fast(
                 identify, amt, pms_list, used,
-                pms_identify_index, pms_amount_index
+                pms_identify_index, pms_amount_index, pms_sorted_amounts
             )
 
         if idx < 0 and amt > 0 and not oid and not identify:
-            idx = _match_by_amount_fast(amt, pms_list, used, pms_amount_index)
+            idx = _match_by_amount_fast(amt, pms_list, used, pms_amount_index, pms_sorted_amounts)
 
         if idx >= 0:
             used.add(idx)

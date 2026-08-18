@@ -459,10 +459,10 @@ class JsonFileSaver(BaseCheckpointSaver):
     # ------------------------------------------------------------------
 
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
-        return self.get_tuple(config)
+        return await asyncio.to_thread(self.get_tuple, config)
 
     async def aget(self, config: RunnableConfig) -> Optional[Checkpoint]:
-        return self.get(config)
+        return await asyncio.to_thread(self.get, config)
 
     async def aput(
         self,
@@ -471,7 +471,7 @@ class JsonFileSaver(BaseCheckpointSaver):
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
-        return self.put(config, checkpoint, metadata, new_versions)
+        return await asyncio.to_thread(self.put, config, checkpoint, metadata, new_versions)
 
     async def aput_writes(
         self,
@@ -480,7 +480,7 @@ class JsonFileSaver(BaseCheckpointSaver):
         task_id: str,
         task_path: str = "",
     ) -> None:
-        return self.put_writes(config, writes, task_id, task_path)
+        return await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
 
     async def alist(
         self,
@@ -490,7 +490,7 @@ class JsonFileSaver(BaseCheckpointSaver):
         before: Optional[RunnableConfig] = None,
         limit: Optional[int] = None,
     ):
-        for item in self.list(config, filter=filter, before=before, limit=limit):
+        for item in await asyncio.to_thread(self.list, config, filter=filter, before=before, limit=limit):
             yield item
 
     # ------------------------------------------------------------------

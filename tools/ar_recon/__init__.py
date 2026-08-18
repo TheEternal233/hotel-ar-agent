@@ -1,15 +1,23 @@
-import os, re
+import os
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import openpyxl
 from langchain.tools import tool
+
 from tools.ar_recon.constants import FNB_CHANNELS, PMS_MARKER, SUPPORTED_EXTS
 from enums.common_enum import OUT_DIR
 from tools.ar_recon.matcher import _match_ota_rezen, _match_ota_rezen_fnb, match_xiangminiao
 from tools.ar_recon.batch_runner import batch_ota_recon
 from tools.ar_recon.report_generator import _generate_ar_report_fnb, _generate_report, _generate_ar_report, \
     _generate_ar_report_a
-from tools.doc_parser import read_ota_channel, read_rezen, detect_ota_channel
+from tools.doc_parser import read_ota_channel, read_rezen, detect_ota_channel_fast, read_sheet
 from utils.ar_recon_utils import read_xiangminiao
 
 os.makedirs(OUT_DIR, exist_ok=True)
+
+# 批量对账最大并行工作线程数
+BATCH_MAX_WORKERS = min(os.cpu_count() or 4, 4)
 
 def _cleanup_uploads(paths):
     for f in paths:
@@ -23,17 +31,48 @@ def _process_single_channel(ota_path, pms_path, channel):
         target = ota_path if os.path.exists(ota_path) else pms_path
         ota_records, card_records, rezen_records = read_xiangminiao(target)
         results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
-        report_path = _generate_ar_report(results, stats, channel, ota_path, pms_path)
+        # 向蜜鸟单文件，预加载 wb 避免 _init_workbook 重复读取
+        xmn_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        try:
+            report_path = _generate_ar_report(
+                results, stats, channel, ota_path, pms_path,
+                ota_wb=xmn_wb, pms_wb=xmn_wb,
+            )
+        finally:
+            xmn_wb.close()
     elif channel in FNB_CHANNELS:
         ota_records = read_ota_channel(ota_path, channel)
         rezen_records = read_rezen(pms_path)
         results, stats = _match_ota_rezen_fnb(ota_records, rezen_records, channel)
-        report_path = _generate_ar_report_fnb(results, stats, channel, ota_path, pms_path)
+        # F&B 报告需要复制源文件 sheet，预加载 wb 避免重复读取
+        ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        pms_wb = openpyxl.load_workbook(pms_path, data_only=False)
+        try:
+            report_path = _generate_ar_report_fnb(
+                results, stats, channel, ota_path, pms_path,
+                ota_wb=ota_wb, pms_wb=pms_wb,
+            )
+        finally:
+            ota_wb.close()
+            pms_wb.close()
     else:
         ota_records = read_ota_channel(ota_path, channel)
         rezen_records = read_rezen(pms_path)
         results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
-        report_path = _generate_ar_report_a(results, stats, channel, ota_path, pms_path)
+        # A类报告需要PMS原始表头+行数据，提前读取避免 _generate_ar_report_a 内部重复加载
+        pms_headers, pms_raw_rows = read_sheet(pms_path)
+        # 同时预加载 wb 避免 _init_workbook 重复读取
+        ota_wb = openpyxl.load_workbook(ota_path, data_only=False)
+        pms_wb = openpyxl.load_workbook(pms_path, data_only=False)
+        try:
+            report_path = _generate_ar_report_a(
+                results, stats, channel, ota_path, pms_path,
+                pms_headers=pms_headers, pms_raw_rows=pms_raw_rows,
+                ota_wb=ota_wb, pms_wb=pms_wb,
+            )
+        finally:
+            ota_wb.close()
+            pms_wb.close()
     return results, stats, report_path
 
 def _build_upload_pairs(upload_dir):
@@ -54,7 +93,7 @@ def _build_upload_pairs(upload_dir):
 
     for ota_file in ota_files:
         ota_path = os.path.join(upload_dir, ota_file)
-        channel = detect_ota_channel(ota_path)
+        channel = detect_ota_channel_fast(ota_path)
         if channel is None or channel == PMS_MARKER:
             continue
 
@@ -103,22 +142,29 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
             files = os.listdir(upload_dir)
             return f"uploads/ 目录文件: {', '.join(files)}。未找到可配对的OTA和PMS文件。"
 
+        # 使用线程池并行处理各渠道（渠道之间无依赖）
         all_results = []
-        for op, pp, ch in pairs:
-            _cleanup.add(op)
-            _cleanup.add(pp)
-            try:
-                results, stats, report_path = _process_single_channel(op, pp, ch)
-                all_results.append({
-                    "channel": ch,
-                    "stats": stats,
-                    "report": report_path,
-                })
-            except Exception as e:
-                all_results.append({
-                    "channel": ch,
-                    "error": str(e),
-                })
+        with ThreadPoolExecutor(max_workers=BATCH_MAX_WORKERS) as executor:
+            future_to_pair = {
+                executor.submit(_process_single_channel, op, pp, ch): (op, pp, ch)
+                for op, pp, ch in pairs
+            }
+            for future in as_completed(future_to_pair):
+                op, pp, ch = future_to_pair[future]
+                _cleanup.add(op)
+                _cleanup.add(pp)
+                try:
+                    results, stats, report_path = future.result()
+                    all_results.append({
+                        "channel": ch,
+                        "stats": stats,
+                        "report": report_path,
+                    })
+                except Exception as e:
+                    all_results.append({
+                        "channel": ch,
+                        "error": str(e),
+                    })
 
         _cleanup_uploads(_cleanup)
 
@@ -160,7 +206,7 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
                 _cleanup.add(p)
 
     if not channel:
-        channel = detect_ota_channel(ota_path)
+        channel = detect_ota_channel_fast(ota_path)
         if channel is None or channel == PMS_MARKER:
             return f"无法自动检测渠道，请手动指定 channel 参数。"
 
