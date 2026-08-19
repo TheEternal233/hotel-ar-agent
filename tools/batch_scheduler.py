@@ -138,6 +138,7 @@ def batch_scheduler(mode: str = "daily") -> str:
         f"任务总数: {len(results)}",
         f"成功: {sum(1 for r in results if r.success)}",
         f"失败: {sum(1 for r in results if not r.success)}",
+        f"需人工复核: {sum(1 for r in results if r.needs_review)}",
         "",
         "各任务详情:",
     ]
@@ -145,7 +146,8 @@ def batch_scheduler(mode: str = "daily") -> str:
         status = "✅" if r.success else "❌"
         if r.status == "skipped":
             status = "⏭️"
+        review_mark = " [待复核]" if r.needs_review else ""
         detail = r.output if r.success else r.error
-        lines.append(f"  [{r.name}] {status} {detail[:100]}")
+        lines.append(f"  [{r.name}] {status}{review_mark} 置信度:{r.confidence:.0%} {detail[:100]}")
 
     return "\n".join(lines)

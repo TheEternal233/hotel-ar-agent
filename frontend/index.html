@@ -268,12 +268,54 @@
 <section id="panel-scheduler" class="panel">
   <div class="panel-header"><h2>智能调度与人工把关</h2></div>
   <div class="workbench">
+    <!-- 统计卡片 -->
+    <div class="approval-stats" id="approvalStats">
+      <div class="approval-stat-card pending">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-info">
+          <div class="stat-num" id="statPending">0</div>
+          <div class="stat-label">待复核</div>
+        </div>
+      </div>
+      <div class="approval-stat-card approved">
+        <div class="stat-icon">✅</div>
+        <div class="stat-info">
+          <div class="stat-num" id="statApproved">0</div>
+          <div class="stat-label">已通过</div>
+        </div>
+      </div>
+      <div class="approval-stat-card rejected">
+        <div class="stat-icon">❌</div>
+        <div class="stat-info">
+          <div class="stat-num" id="statRejected">0</div>
+          <div class="stat-label">已驳回</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 执行按钮 -->
     <div class="scheduler-grid">
       <div class="sched-card"><h3>日清任务</h3><p>信用卡对账</p><button class="btn-primary" onclick="scheduleRun('daily')">执行日清</button></div>
       <div class="sched-card"><h3>月度任务</h3><p>OTA对账、账龄分析、携程佣金</p><button class="btn-primary" onclick="scheduleRun('monthly')">执行月度</button></div>
-      <div class="sched-card">...查看审批</button></div>
+      <div class="sched-card"><h3>审批队列</h3><p>查看待复核任务</p><button class="btn-primary" onclick="loadApprovalQueue()">查看审批</button></div>
     </div>
+
+    <!-- 调度执行结果 -->
     <div class="wb-result" id="schedulerResult" style="margin-top:16px"></div>
+
+    <!-- 审批队列列表 -->
+    <div class="approval-queue-section" id="approvalQueueSection" style="display:none;margin-top:20px;">
+      <div class="approval-queue-header">
+        <h3>审批队列</h3>
+        <div class="approval-filters">
+          <button class="btn-sm active" onclick="filterApprovals('all')">全部</button>
+          <button class="btn-sm" onclick="filterApprovals('pending')">待复核</button>
+          <button class="btn-sm" onclick="filterApprovals('approved')">已通过</button>
+          <button class="btn-sm" onclick="filterApprovals('rejected')">已驳回</button>
+        </div>
+      </div>
+      <div class="approval-list" id="approvalList"></div>
+    </div>
   </div>
 </section>
 
@@ -291,12 +333,6 @@
       <input type="file" id="dropFileInput" multiple accept=".xlsx,.xls" hidden onchange="handleDropUpload(event)">
     </div>
 
-    <!-- 上传结果 / 预览区 -->
-    <div id="uploadPreviewArea" class="upload-preview-area" style="display:none">
-      <h3>上传结果</h3>
-      <div id="uploadResults"></div>
-    </div>
-
     <!-- 文件列表管理 -->
     <div class="filemgr-section">
       <div class="filemgr-toolbar">
@@ -309,6 +345,12 @@
       <div class="filemgr-list" id="uploadsList">
         <div class="filemgr-empty">点击「刷新」加载文件列表</div>
       </div>
+    </div>
+
+    <!-- 上传结果 / 预览区 -->
+    <div id="uploadPreviewArea" class="upload-preview-area" style="display:none">
+      <h3>上传结果</h3>
+      <div id="uploadResults"></div>
     </div>
   </div>
 </section>

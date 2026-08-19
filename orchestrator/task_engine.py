@@ -27,6 +27,8 @@ class TaskResult:
     status: str = ""          # success / failed / skipped
     run_id: str = ""          # 所属调度批次ID
     skipped_reason: str = ""  # 被跳过原因
+    confidence: float = 0.0   # 置信度评分 0.0 ~ 1.0
+    needs_review: bool = False  # 是否需要人工复核
 
 @dataclass
 class TaskDef:
@@ -139,7 +141,18 @@ class TaskEngine:
                 # 成功，返回结果
                 duration=int((datetime.now() - start).total_seconds() * 1000)
                 retry_info=f"(重试{attempt}次后成功)" if attempt>0 else ""
-                return TaskResult(name=name, success=True,status="success", output=str(output)+retry_info,duration_ms=duration, run_id=self.run_id)
+
+                # 计算置信度
+                output_str = str(output) + retry_info
+                confidence = self._calculate_confidence(name, output_str, True)
+                needs_review = confidence < 0.8
+
+                return TaskResult(
+                    name=name, success=True, status="success",
+                    output=output_str, duration_ms=duration,
+                    run_id=self.run_id, confidence=confidence,
+                    needs_review=needs_review
+                )
 
             except asyncio.TimeoutError:
                 # 超时，记录错误，等待后重试
@@ -172,11 +185,33 @@ class TaskEngine:
         except Exception:
             pass
 
+        # 计算失败时的置信度（总是0，需要复核）
+        confidence = 0.0
+        needs_review = True
+
+        # 写入失败日志，供前端提示人工处理
+        try:
+            failed_log=os.path.join(BASE_DIR,"data","failed_tasks.jsonl")
+            os.makedirs(os.path.dirname(failed_log), exist_ok=True)
+            with open(failed_log,"a",encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "timestamp":datetime.now().isoformat(),
+                    "task":name,
+                    "error":error_msg,
+                    "status":"pending_review",
+                    "confidence": confidence,
+                    "needs_review": needs_review,
+                },ensure_ascii=False)+"\n")
+        except Exception:
+            pass
+
         return TaskResult(
             name=name, success=False,status="failed",
             error=error_msg,
             duration_ms=duration,
             run_id=self.run_id,
+            confidence=confidence,
+            needs_review=needs_review,
         )
 
 
@@ -232,6 +267,26 @@ class TaskEngine:
                 all_results.append(r)
 
         return all_results
+
+    @staticmethod
+    def _calculate_confidence(task_name: str, output: str, success: bool) -> float:
+        """计算任务执行结果的置信度"""
+        if not success:
+            return 0.0
+
+        # 检查输出中的关键词
+        error_keywords = ["错误", "失败", "异常", "❌"]
+        warning_keywords = ["差异", "未匹配", "跳过", "⚠️"]
+        success_keywords = ["成功", "完成", "✅", "对平"]
+
+        if any(kw in output for kw in error_keywords):
+            return 0.3
+        if any(kw in output for kw in warning_keywords):
+            return 0.6
+        if any(kw in output for kw in success_keywords):
+            return 1.0
+
+        return 0.7
 
     def shutdown(self):
         """关闭线程池，释放资源"""

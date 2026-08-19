@@ -9,6 +9,9 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     thread_id: str = ""
+    needs_review: bool = False
+    confidence: float = 1.0
+    approval_id: str | None = None
 
 class TaskRequest(BaseModel):
     module: str
@@ -85,4 +88,3 @@ class OtaConfirmRequest(BaseModel):
     comments: str = ""
     match_results: list = []  # 前端传入preview时的匹配结果
     stats: dict = {}
-

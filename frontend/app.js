@@ -153,6 +153,19 @@
           else if (p.type === "tool_start") addMsg("system", "[工具] " + p.name);
           else if (p.type === "tool_end") addMsg("system", "[工具完成] " + p.name);
           else if (p.type === "error") addMsg("system", "[错误] " + p.content);
+          else if (p.type === "approval_needed") {
+            // 阻断低置信度结果：清空流式显示区域，替换为审批提示
+            if (sd) {
+              sd.querySelector(".msg-content").textContent = (
+                "⚠️ 该任务结果置信度较低（" + Math.round(p.confidence * 100) + "%），已提交人工复核，结果暂不展示。\n\n" +
+                "审批ID: " + p.approval_id + "\n" +
+                "任务: " + (p.task_name || "未知") + "\n\n" +
+                "请前往「智能调度」→「查看审批」进行复核。\n" +
+                "复核通过后，结果将正式生效。"
+              );
+              sd = null;
+            }
+          }
         } catch(ex) {}
       }
     }
@@ -661,8 +674,134 @@
       if (btn) btnEnable(btn, mode === "daily" ? "执行日清" : "执行月度");
     };
 
-  window.viewApprovals = function() {
-    addMsg("system", "[审批] 审批队列将在部署时配置");
+  // ===== Approval Queue (审批队列) =====
+  window._approvalState = { filter: 'all', items: [] };
+
+  window.loadApprovalQueue = async function() {
+    var section = document.getElementById("approvalQueueSection");
+    section.style.display = "block";
+
+    try {
+      // 加载统计
+      var statsResp = await fetch(API + "/scheduler/stats");
+      var statsData = await statsResp.json();
+      if (statsData.ok && statsData.stats) {
+        document.getElementById("statPending").textContent = statsData.stats.pending || 0;
+        document.getElementById("statApproved").textContent = statsData.stats.approved || 0;
+        document.getElementById("statRejected").textContent = statsData.stats.rejected || 0;
+      }
+
+      // 加载队列
+      var queueResp = await fetch(API + "/scheduler/approvals");
+      var queueData = await queueResp.json();
+      if (queueData.ok) {
+        window._approvalState.items = queueData.items || [];
+        renderApprovalList();
+      }
+    } catch(e) {
+      document.getElementById("approvalList").innerHTML = '<div class="approval-empty">加载失败: ' + e.message + '</div>';
+    }
+  };
+
+  window.filterApprovals = function(status) {
+    window._approvalState.filter = status;
+    // 更新按钮状态
+    document.querySelectorAll('.approval-filters .btn-sm').forEach(function(btn) {
+      btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
+    renderApprovalList();
+  };
+
+  function renderApprovalList() {
+    var container = document.getElementById("approvalList");
+    var items = window._approvalState.items;
+    var filter = window._approvalState.filter;
+
+    if (filter !== 'all') {
+      items = items.filter(function(item) { return item.status === filter; });
+    }
+
+    if (items.length === 0) {
+      container.innerHTML = '<div class="approval-empty">暂无审批记录</div>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var statusClass = item.status === 'pending' ? 'pending' : (item.status === 'approved' ? 'approved' : 'rejected');
+      var statusText = item.status === 'pending' ? '待复核' : (item.status === 'approved' ? '已通过' : '已驳回');
+      var confidencePercent = Math.round((item.confidence || 0) * 100);
+      var confidenceClass = confidencePercent >= 80 ? 'high' : (confidencePercent >= 50 ? 'medium' : 'low');
+
+      html += '<div class="approval-item ' + statusClass + '">' +
+        '<div class="approval-header">' +
+          '<span class="approval-id">' + item.id + '</span>' +
+          '<span class="approval-status ' + statusClass + '">' + statusText + '</span>' +
+        '</div>' +
+        '<div class="approval-body">' +
+          '<div class="approval-task">任务: ' + item.task_name + '</div>' +
+          '<div class="approval-confidence ' + confidenceClass + '">置信度: ' + confidencePercent + '%</div>' +
+          '<div class="approval-output">' + (item.output || '').substring(0, 200) + '</div>' +
+          '<div class="approval-time">创建: ' + item.created_at + '</div>' +
+        '</div>';
+
+      html += '<div class="approval-actions">';
+      if (item.status === 'pending') {
+        html += '<button class="btn-xs btn-success" onclick="handleApproval(\'' + item.id + '\', \'approve\')">通过</button>' +
+          '<button class="btn-xs btn-danger" onclick="handleApproval(\'' + item.id + '\', \'reject\')">驳回</button>' +
+          '<input type="text" class="approval-note-input" placeholder="添加备注..." id="note-' + item.id + '">';
+      } else {
+        html += '<span class="approval-resolved">处理: ' + (item.resolved_at || '-') +
+          (item.note ? ' | 备注: ' + item.note : '') + '</span>';
+      }
+      html += '<button class="btn-xs btn-secondary" onclick="deleteApproval(\'' + item.id + '\')" title="删除">🗑️</button>' +
+        '</div>';
+
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  }
+
+  window.handleApproval = async function(approvalId, action) {
+    var noteInput = document.getElementById("note-" + approvalId);
+    var note = noteInput ? noteInput.value.trim() : "";
+
+    try {
+      var resp = await fetch(API + "/scheduler/approvals/" + approvalId + "/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approval_id: approvalId, action: action, note: note })
+      });
+      var data = await resp.json();
+      if (data.ok) {
+        // 刷新列表
+        loadApprovalQueue();
+      } else {
+        alert("操作失败: " + (data.detail || "未知"));
+      }
+    } catch(e) {
+      alert("操作失败: " + e.message);
+    }
+  };
+
+  window.deleteApproval = async function(approvalId) {
+    if (!confirm("确定要删除该审批项吗？")) return;
+
+    try {
+      var resp = await fetch(API + "/scheduler/approvals/" + approvalId, {
+        method: "DELETE"
+      });
+      var data = await resp.json();
+      if (data.ok) {
+        loadApprovalQueue();
+      } else {
+        alert("删除失败: " + (data.detail || "未知"));
+      }
+    } catch(e) {
+      alert("删除失败: " + e.message);
+    }
   };
 
   // ===== Drag & Drop Upload with Validation =====
