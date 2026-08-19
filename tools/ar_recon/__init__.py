@@ -129,6 +129,9 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
     渠道可选: 携程客房, 携程餐饮, 美团客房, 美团餐饮, 飞猪, 抖音, 向蜜鸟
     留空则自动检测渠道。
     不传参数时自动扫描 uploads/ 目录下的文件，按文件名自动配对多平台。
+
+    注意：向蜜鸟渠道特殊，OTA和PMS数据在同一个xlsx文件的不同sheet中，
+    因此向蜜鸟只需提供 ota_path（该文件同时包含PMS数据），pms_path 可留空。
     """
     _cleanup = set()
     if not ota_path and not pms_path:
@@ -190,28 +193,38 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
             f"各渠道明细:\n" + "\n".join(channel_lines)
         )
 
-    if not ota_path or not pms_path:
-        return "错误：请同时提供 ota_path 和 pms_path，或都不提供进行批量对账"
-
-    if not os.path.exists(ota_path):
-        return f"错误：OTA文件不存在: {ota_path}"
-    if not os.path.exists(pms_path):
-        return f"错误：PMS文件不存在: {pms_path}"
+    # 向蜜鸟：单文件多sheet，只需 ota_path
+    if channel == "向蜜鸟" or (not channel and detect_ota_channel_fast(ota_path) == "向蜜鸟"):
+        if not ota_path:
+            return "错误：向蜜鸟渠道只需提供 ota_path（单文件包含OTA和PMS数据）"
+        if not os.path.exists(ota_path):
+            return f"错误：向蜜鸟文件不存在: {ota_path}"
+        actual_channel = "向蜜鸟"
+    else:
+        # 其他渠道：需要 ota_path 和 pms_path 两个文件
+        if not ota_path or not pms_path:
+            return "错误：请同时提供 ota_path 和 pms_path，或都不提供进行批量对账"
+        if not os.path.exists(ota_path):
+            return f"错误：OTA文件不存在: {ota_path}"
+        if not os.path.exists(pms_path):
+            return f"错误：PMS文件不存在: {pms_path}"
+        actual_channel = channel or detect_ota_channel_fast(ota_path)
+        if actual_channel is None or actual_channel == PMS_MARKER:
+            return f"无法自动检测渠道，请手动指定 channel 参数。"
 
     from enums.common_enum import BASE_DIR
     upload_dir = os.path.join(BASE_DIR, "uploads")
     if not _cleanup:
         for p in (ota_path, pms_path):
-            if os.path.abspath(p).startswith(os.path.abspath(upload_dir)):
+            if p and os.path.abspath(p).startswith(os.path.abspath(upload_dir)):
                 _cleanup.add(p)
 
-    if not channel:
-        channel = detect_ota_channel_fast(ota_path)
-        if channel is None or channel == PMS_MARKER:
-            return f"无法自动检测渠道，请手动指定 channel 参数。"
-
     try:
-        results, stats, report_path = _process_single_channel(ota_path, pms_path, channel)
+        # 向蜜鸟：ota_path 和 pms_path 传同一个文件
+        if actual_channel == "向蜜鸟":
+            results, stats, report_path = _process_single_channel(ota_path, ota_path, actual_channel)
+        else:
+            results, stats, report_path = _process_single_channel(ota_path, pms_path, actual_channel)
     except Exception as e:
         _cleanup_uploads(_cleanup)
         return f"读取文件失败: {e}"
@@ -219,7 +232,7 @@ def ar_recon(ota_path: str = "", pms_path: str = "", channel: str = "") -> str:
     _cleanup_uploads(_cleanup)
 
     return (
-        f"OTA对账完成 [{channel}]\n"
+        f"OTA对账完成 [{actual_channel}]\n"
         f"报告: {report_path}\n"
         f"OTA记录: {stats['total_ota']}  PMS记录: {stats['total_pms']}\n"
         f"匹配: {stats['match']}  差异: {stats['diff']}  仅OTA: {stats['ota_only']}  仅PMS: {stats['pms_only']}"

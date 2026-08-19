@@ -4,6 +4,7 @@ from orchestrator.tool_wrapper import with_resilience
 from tools.protocol_settlement.aging_pms import aging_analysis, aging_and_notice
 from tools.search import bocha_search
 from tools.ar_recon import ar_recon
+from tools.batch_scheduler import batch_scheduler
 
 from tools.ctrip_commission_reconcile.ctrip_commission import ctrip_commission
 from tools.daily_ar import daily_ar_processing
@@ -21,6 +22,7 @@ TOOLS = [
     with_resilience(daily_ar_processing, retries=2, timeout=60),
     with_resilience(credit_card_recon, retries=2, timeout=120),
     with_resilience(data_integration, retries=1, timeout=30),
+    with_resilience(batch_scheduler, retries=1, timeout=600),
 ]
 
 SYSTEM_PROMPT = 'You are a hotel AR accounting AI assistant. Use tools to help with reconciliation, aging analysis, credit card matching, etc. Respond in Chinese.'
