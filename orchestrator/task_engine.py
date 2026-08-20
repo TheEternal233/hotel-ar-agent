@@ -171,20 +171,6 @@ class TaskEngine:
         duration = int((datetime.now() - start).total_seconds() * 1000)
         error_msg=f"{last_error} (已重试{task.retries}次，全部失败)"
 
-        # 写入失败日志，供前端提示人工处理
-        try:
-            failed_log=os.path.join(BASE_DIR,"data","failed_tasks.jsonl")
-            os.makedirs(os.path.dirname(failed_log), exist_ok=True)
-            with open(failed_log,"a",encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "timestamp":datetime.now().isoformat(),
-                    "task":name,
-                    "error":error_msg,
-                    "status":"pending_review",
-                },ensure_ascii=False)+"\n")
-        except Exception:
-            pass
-
         # 计算失败时的置信度（总是0，需要复核）
         confidence = 0.0
         needs_review = True

@@ -42,12 +42,14 @@ class JsonFileSaver(BaseCheckpointSaver):
         self,
         save_dir: str | Path = "./data/memory",
         max_cache_threads: int = 50,
+        max_checkpoints_per_thread: int = 100,
         flush_interval: float = 2.0,
     ):
         super().__init__()
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.max_cache = max(max_cache_threads, 1)
+        self.max_checkpoints = max(max_checkpoints_per_thread, 10)
         self.flush_interval = flush_interval
         # 内存缓存：thread_id -> 存储数据
         self._cache: dict[str, dict] = {}
@@ -223,6 +225,52 @@ class JsonFileSaver(BaseCheckpointSaver):
             oldest_data = self._cache.pop(oldest_tid)
             self._save_to_disk(oldest_tid, oldest_data)
 
+    def _prune_checkpoints(self, thread_id: str, checkpoint_ns: str) -> int:
+        """裁剪指定线程的旧检查点，保留最近 max_checkpoints 个。
+        同时清理孤儿 writes 和 blobs。
+        返回删除的检查点数量。
+        """
+        data = self._cache.get(thread_id)
+        if data is None:
+            return 0
+
+        checkpoints = data["storage"].get(thread_id, {}).get(checkpoint_ns, {})
+        if len(checkpoints) <= self.max_checkpoints:
+            return 0
+
+        # 按 checkpoint_id 排序，保留最新的 max_checkpoints 个
+        sorted_ids = sorted(checkpoints.keys())
+        to_keep = set(sorted_ids[-self.max_checkpoints:])
+        removed = 0
+
+        # 删除旧检查点及其 writes
+        for cp_id in sorted_ids:
+            if cp_id in to_keep:
+                continue
+            del checkpoints[cp_id]
+            removed += 1
+            # 清理对应的 writes
+            data["writes"].pop((thread_id, checkpoint_ns, cp_id), None)
+
+        # 清理孤儿 blobs：收集剩余检查点引用的所有 (channel, version)
+        active_versions: set[tuple[str, str]] = set()
+        stored = data["storage"].get(thread_id, {})
+        for ns, cps in stored.items():
+            for cp_id, (cp_tuple, _meta_tuple, _parent) in cps.items():
+                checkpoint = self.serde.loads_typed(cp_tuple)
+                for ch, ver in checkpoint.get("channel_versions", {}).items():
+                    active_versions.add((ch, ver))
+
+        # 移除不再被任何检查点引用的 blob
+        orphan_keys = []
+        for (tid, ns, ch, ver) in data["blobs"]:
+            if tid == thread_id and (ch, ver) not in active_versions:
+                orphan_keys.append((tid, ns, ch, ver))
+        for key in orphan_keys:
+            del data["blobs"][key]
+
+        return removed
+
     def _get_thread_data(self, thread_id: str) -> dict:
         """获取指定线程的存储数据（从缓存或磁盘加载）"""
         if thread_id in self._cache:
@@ -377,6 +425,9 @@ class JsonFileSaver(BaseCheckpointSaver):
             }
         )
 
+        # 裁剪旧检查点，防止无限增长
+        self._prune_checkpoints(thread_id, checkpoint_ns)
+
         # 标记脏数据，由后台线程异步写入磁盘
         self._mark_dirty(thread_id)
 
@@ -509,6 +560,21 @@ class JsonFileSaver(BaseCheckpointSaver):
     # 管理接口
     # ------------------------------------------------------------------
 
+    def close(self) -> None:
+        """安全关闭：停止后台刷盘线程并确保所有数据落盘"""
+        if self._shutdown:
+            return
+        self._shutdown = True
+        self._flush_event.set()
+        self._flush_thread.join(timeout=5.0)
+        self._do_flush()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def _flush_and_wait(self) -> None:
         """强制刷盘并等待完成（用于关机等需要确保数据落盘的场景）"""
         self._do_flush()
@@ -541,6 +607,7 @@ class JsonFileSaver(BaseCheckpointSaver):
             return {
                 "cached_threads": len(self._cache),
                 "max_cache": self.max_cache,
+                "max_checkpoints_per_thread": self.max_checkpoints,
                 "save_dir": str(self.save_dir),
                 "disk_files": len(list(self.save_dir.glob("*.json"))),
                 "dirty_threads": len(self._dirty),
