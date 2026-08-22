@@ -9,7 +9,7 @@
 - 提供结构化查询接口
 
 使用方式：
-    from utils.audit_logger import audit
+    from utils.audit_engine import audit
 
     audit.log("ota_recon", "confirm", "确认携程客房对账，匹配120笔差异3笔",
               user="财务张三", context={"channel": "携程客房", "stats": {...}})

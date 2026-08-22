@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles
 
 from deps import FRONTEND_DIR, logger
 
-from routers import chat, ota, aging, card, ctrip, invoice, config, scheduler, files, audit
+from routers import chat, ota, aging, card, ctrip, invoice, config, scheduler, files, audit as audit_router
+from utils.audit_engine import audit as _audit_logger
 
 
 async def _audit_cleanup_daemon():
@@ -25,8 +26,7 @@ async def _audit_cleanup_daemon():
         await asyncio.sleep(seconds_until_3am)
 
         try:
-            from utils.audit_logger import audit as audit_logger
-            deleted = audit_logger.cleanup(retain_days=7)
+            deleted = _audit_logger.cleanup(retain_days=7)
             if deleted > 0:
                 logger.info(f"审计日志自动清理: 删除 {deleted} 个超过 7 天的文件")
         except Exception as e:
@@ -46,11 +46,9 @@ app = FastAPI(title="酒店应收会计AI智能体系统", version="2.0", lifesp
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
-# ── 审计中间件：自动记录所有 API 请求 ──
+# ── 审计中间件：自动记录关键 API 请求 ──
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
-    from utils.audit_logger import audit as audit_logger
-
     start = time.perf_counter()
     response = None
     status_code = 500
@@ -64,24 +62,33 @@ async def audit_middleware(request: Request, call_next):
     finally:
         duration_ms = int((time.perf_counter() - start) * 1000)
         path = request.url.path
+        method = request.method
 
-        # 跳过审计日志自身的查询接口，避免无限递归
-        if path.startswith("/api/audit/") or path.startswith("/frontend"):
-            pass
-        elif path in ("/", "/api/health"):
-            pass
-        else:
+        should_log = False
+
+        # 1. 所有写操作都记录
+        if method in ("POST", "PUT", "DELETE"):
+            # 但跳过文件上传验证、审计日志自身、前端静态资源
+            if not path.startswith("/api/audit/") and not path.startswith("/frontend"):
+                should_log = True
+
+        # 2. 特定的 GET 操作需要记录（AI对话、OTA对账、信用卡对账）
+        elif method == "GET":
+            if path.startswith("/api/chat") or path.startswith("/api/ota") or path.startswith("/api/card"):
+                should_log = True
+
+        if should_log:
             audit_status = "success" if status_code < 400 else "failed"
             client_ip = request.client.host if request.client else ""
 
-            audit_logger.log(
+            _audit_logger.log(
                 module="api",
-                action=request.method.lower(),
-                detail=f"{request.method} {path} → {status_code}",
+                action=method.lower(),
+                detail=f"{method} {path} → {status_code}",
                 user="system",
                 ip=client_ip,
                 status=audit_status,
-                context={"path": path, "method": request.method, "status_code": status_code},
+                context={"path": path, "method": method, "status_code": status_code},
                 duration_ms=duration_ms,
             )
 
@@ -117,4 +124,4 @@ app.include_router(invoice.router)
 app.include_router(config.router)
 app.include_router(scheduler.router)
 app.include_router(files.router)
-app.include_router(audit.router)
+app.include_router(audit_router.router)

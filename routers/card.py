@@ -2,6 +2,7 @@ import os
 
 from fastapi import APIRouter, HTTPException
 
+from utils.audit_engine import audit
 from tools.credit_card_recon.constants import RECON_PAYMENT_METHODS
 from tools.credit_card_recon.matcher import _reconcile_channel
 from tools.credit_card_recon import credit_card_recon
@@ -9,7 +10,6 @@ from deps import cleanup_uploads, logger
 from schemas import CardReconRequest, CardReconConfirmRequest
 from tools.credit_card_recon.parser import _read_yfd_pms, _read_yfd_bank, _read_pos_statement, _read_pms_report
 from tools.credit_card_recon.reporter import _generate_recon_report
-from utils.audit_logger import audit
 
 router = APIRouter(prefix="/api", tags=["card"])
 
@@ -106,9 +106,6 @@ async def card_recon_preview(req: CardReconRequest):
                     "raw": um.get("raw", {}),
                     "id": f"pos_{r['channel']}_{um.get('amount', 0)}_{hash(str(um.get('raw', {}))) & 0xFFFFFFFF}",
                 })
-
-        audit.log("card_recon", "preview", f"信用卡对账预览: {len(summary)}个渠道, 差异{sum(1 for s in summary if not s['balanced'])}个",
-                  context={"summary": [{"channel": s["channel"], "balanced": s["balanced"], "diff": s["diff"]} for s in summary]})
 
         return {
             "ok": True,

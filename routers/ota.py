@@ -4,7 +4,7 @@ from tools.ar_recon import ar_recon, _match_ota_rezen_fnb, FNB_CHANNELS, match_x
 from deps import logger
 from schemas import OtaReconRequest, OtaConfirmRequest, OtaMatchRequest, OtaUploadRequest
 from tools.doc_parser import read_rezen, read_ota_channel, detect_ota_channel
-from utils.audit_logger import audit
+from utils.audit_engine import audit
 
 router = APIRouter(prefix="/api", tags=["ota"])
 
@@ -60,11 +60,6 @@ async def ota_upload_preview(req: OtaUploadRequest):
                 "headers": pms_info["headers"][:20],
                 "is_rezen": any(m in " ".join(pms_info["headers"]) for m in ["账单号", "外部订单号"]),
             }
-
-        audit.log("ota_recon", "upload", f"OTA对账文件上传预览: OTA={req.ota_path}, PMS={req.pms_path}",
-                  context={"ota_path": req.ota_path, "pms_path": req.pms_path,
-                           "ota_rows": result["ota"]["rows"] if result["ota"] else 0,
-                           "pms_rows": result["pms"]["rows"] if result["pms"] else 0})
 
         return {"ok": True, "preview": result}
     except Exception as e:
@@ -126,9 +121,6 @@ async def ota_match_preview(req: OtaMatchRequest):
             elif r["status"] == "pms_only":
                 item["pms_detail"] = r.get("pms", {})
                 pms_only_list.append(item)
-
-        audit.log("ota_recon", "match", f"OTA对账匹配完成: {channel}, 匹配{stats.get('match',0)}笔差异{stats.get('diff',0)}笔",
-                  context={"channel": channel, "stats": stats})
 
         return {
             "ok": True,

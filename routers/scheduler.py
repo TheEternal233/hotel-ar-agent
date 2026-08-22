@@ -17,7 +17,7 @@ from orchestrator.approval_store import (
     get_approval_stats,
 )
 from deps import BASE_DIR, UPLOAD_DIR, logger
-from utils.audit_logger import audit
+from utils.audit_engine import audit
 
 router = APIRouter(prefix="/api", tags=["scheduler"])
 
