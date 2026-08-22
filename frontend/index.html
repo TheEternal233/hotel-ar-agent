@@ -18,6 +18,7 @@
     <a href="#" data-module="card" class="nav-item" onclick="switchPanel(&apos;card&apos;);return false"><span class="icon">C</span>信用卡审核面板</a>
     <a href="#" data-module="ctrip" class="nav-item" onclick="switchPanel(&apos;ctrip&apos;);return false"><span class="icon">X</span>携程佣金</a>
     <div class="nav-section">系统管理</div>
+    <a href="#" data-module="audit" class="nav-item" onclick="switchPanel('audit');return false"><span class="icon">🕒</span>审计日志</a>
     <a href="#" data-module="config" class="nav-item" onclick="switchPanel('config');return false"><span class="icon">S</span>数据准备</a>
     <a href="#" data-module="scheduler" class="nav-item" onclick="switchPanel('scheduler');return false"><span class="icon">T</span>智能调度</a>
     <a href="#" data-module="uploads" class="nav-item" onclick="switchPanel('uploads');return false"><span class="icon">U</span>上传文件管理</a>
@@ -365,6 +366,101 @@
     </div>
     <div class="filemgr-list" id="outputList">
       <div class="filemgr-empty">点击「刷新」加载文件列表</div>
+    </div>
+  </div>
+</section>
+
+<!-- Audit Log Panel -->
+<section id="panel-audit" class="panel">
+  <div class="panel-header"><h2>操作审计日志</h2><span class="hint">所有用户操作、系统任务、API请求的完整追溯记录</span></div>
+  <div class="workbench">
+    <!-- 统计卡片 -->
+    <div class="audit-stats" id="auditStats">
+      <div class="audit-stat-card">
+        <div class="stat-num" id="auditTotal">-</div>
+        <div class="stat-label">总记录</div>
+      </div>
+      <div class="audit-stat-card success">
+        <div class="stat-num" id="auditSuccess">-</div>
+        <div class="stat-label">成功</div>
+      </div>
+      <div class="audit-stat-card failed">
+        <div class="stat-num" id="auditFailed">-</div>
+        <div class="stat-label">失败</div>
+      </div>
+      <div class="audit-stat-card">
+        <div class="stat-num" id="auditUsers">-</div>
+        <div class="stat-label">操作用户</div>
+      </div>
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="audit-toolbar">
+      <div class="audit-filters">
+        <select id="auditModuleFilter" onchange="loadAuditLogs()">
+          <option value="">全部模块</option>
+          <option value="ota_recon">OTA对账</option>
+          <option value="card_recon">信用卡对账</option>
+          <option value="aging">账龄分析</option>
+          <option value="ctrip">携程佣金</option>
+          <option value="invoice">发票管理</option>
+          <option value="scheduler">智能调度</option>
+          <option value="files">文件管理</option>
+          <option value="config">系统配置</option>
+          <option value="chat">AI对话</option>
+          <option value="api">API请求</option>
+        </select>
+        <select id="auditActionFilter" onchange="loadAuditLogs()">
+          <option value="">全部操作</option>
+          <option value="upload">上传</option>
+          <option value="match">匹配</option>
+          <option value="confirm">确认</option>
+          <option value="approve">通过</option>
+          <option value="reject">驳回</option>
+          <option value="delete">删除</option>
+          <option value="export">导出</option>
+          <option value="start">启动</option>
+          <option value="post">API请求</option>
+        </select>
+        <select id="auditStatusFilter" onchange="loadAuditLogs()">
+          <option value="">全部状态</option>
+          <option value="success">成功</option>
+          <option value="failed">失败</option>
+          <option value="blocked">已拦截</option>
+        </select>
+        <select id="auditDaysFilter" onchange="loadAuditLogs()">
+          <option value="1">今天</option>
+          <option value="3">最近3天</option>
+          <option value="7" selected>最近7天</option>
+          <option value="30">最近30天</option>
+          <option value="90">最近90天</option>
+        </select>
+        <button class="btn-primary" onclick="loadAuditLogs()">查询</button>
+        <button class="btn-sm" onclick="loadAuditStats()">刷新统计</button>
+      </div>
+    </div>
+
+    <!-- 日志列表 -->
+    <div class="audit-list-container">
+      <div class="audit-list-header">
+        <span class="audit-col-time">时间</span>
+        <span class="audit-col-user">用户</span>
+        <span class="audit-col-module">模块</span>
+        <span class="audit-col-action">操作</span>
+        <span class="audit-col-detail">详情</span>
+        <span class="audit-col-status">状态</span>
+        <span class="audit-col-duration">耗时</span>
+      </div>
+      <div class="audit-list" id="auditList">
+        <div class="audit-empty">点击「查询」加载审计日志</div>
+      </div>
+    </div>
+
+    <!-- 分页 -->
+    <div class="audit-pagination" id="auditPagination" style="display:none">
+      <span id="auditPageInfo"></span>
+      <button class="btn-sm" id="auditPrevBtn" onclick="auditPrevPage()" disabled>上一页</button>
+      <button class="btn-sm" id="auditNextBtn" onclick="auditNextPage()">下一页</button>
     </div>
   </div>
 </section>

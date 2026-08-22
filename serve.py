@@ -1,15 +1,16 @@
 """酒店应收会计AI智能体 — FastAPI Web服务 + 静态前端 + 专用模块端点"""
 import logging
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from deps import FRONTEND_DIR, logger
 
-from routers import chat, ota, aging, card, ctrip, invoice, config, scheduler, files
+from routers import chat, ota, aging, card, ctrip, invoice, config, scheduler, files, audit
 
 
 @asynccontextmanager
@@ -21,6 +22,49 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="酒店应收会计AI智能体系统", version="2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+# ── 审计中间件：自动记录所有 API 请求 ──
+@app.middleware("http")
+async def audit_middleware(request: Request, call_next):
+    from utils.audit_logger import audit as audit_logger
+
+    start = time.perf_counter()
+    response = None
+    status_code = 500
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception:
+        status_code = 500
+        raise
+    finally:
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        path = request.url.path
+
+        # 跳过审计日志自身的查询接口，避免无限递归
+        if path.startswith("/api/audit/") or path.startswith("/frontend"):
+            pass
+        elif path in ("/", "/api/health"):
+            pass
+        else:
+            audit_status = "success" if status_code < 400 else "failed"
+            client_ip = request.client.host if request.client else ""
+
+            audit_logger.log(
+                module="api",
+                action=request.method.lower(),
+                detail=f"{request.method} {path} → {status_code}",
+                user="system",
+                ip=client_ip,
+                status=audit_status,
+                context={"path": path, "method": request.method, "status_code": status_code},
+                duration_ms=duration_ms,
+            )
+
+    return response
+
 
 if FRONTEND_DIR.exists():
     app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
@@ -51,3 +95,4 @@ app.include_router(invoice.router)
 app.include_router(config.router)
 app.include_router(scheduler.router)
 app.include_router(files.router)
+app.include_router(audit.router)

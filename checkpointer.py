@@ -518,7 +518,7 @@ class JsonFileSaver(BaseCheckpointSaver):
         return iter(results)
 
     # ------------------------------------------------------------------
-    # 异步方法（直接调用同步版本）
+    # 异步方法
     # ------------------------------------------------------------------
 
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:

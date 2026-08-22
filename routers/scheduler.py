@@ -17,6 +17,7 @@ from orchestrator.approval_store import (
     get_approval_stats,
 )
 from deps import BASE_DIR, UPLOAD_DIR, logger
+from utils.audit_logger import audit
 
 router = APIRouter(prefix="/api", tags=["scheduler"])
 
@@ -94,15 +95,21 @@ async def scheduler_run(mode: str):
             save_approval_item(approval_item)
             pending_approvals.append(approval_item)
 
-    return {
-        "ok": True,
-        "results": messages,
-        "summary": {
+    summary = {
             "total": len(results),
             "success": sum(1 for r in results if r.success),
             "failed": sum(1 for r in results if not r.success),
             "needs_review": sum(1 for r in results if r.needs_review),
-        },
+        }
+
+    audit.log("scheduler", "start", f"智能调度执行完成: {summary['success']}/{summary['total']}成功",
+              context={"mode": mode, "total": summary["total"], "success": summary["success"],
+                       "failed": summary["failed"], "needs_review": summary["needs_review"]})
+
+    return {
+        "ok": True,
+        "results": messages,
+        "summary": summary,
         "pending_approvals": pending_approvals,
     }
 
@@ -182,6 +189,8 @@ async def approval_action(approval_id: str, action: ApprovalAction):
     }
 
     if update_approval_item(approval_id, updates):
+        audit.log("scheduler", updates["action"], f"审批{updates['status']}: {approval_id}",
+                  context={"approval_id": approval_id, "action": action.action, "note": action.note})
         return {"ok": True, "message": f"审批已{updates['status']}"}
     else:
         raise HTTPException(status_code=404, detail="审批项不存在")

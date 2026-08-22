@@ -1015,6 +1015,144 @@
       alert("清理失败: " + e.message);
     }
   };
+  // ===== Audit Log =====
+  window._auditState = { page: 0, pageSize: 50, total: 0 };
+
+  window.loadAuditLogs = async function() {
+    var module = document.getElementById("auditModuleFilter").value;
+    var action = document.getElementById("auditActionFilter").value;
+    var status = document.getElementById("auditStatusFilter").value;
+    var days = document.getElementById("auditDaysFilter").value;
+    var state = window._auditState;
+    var offset = state.page * state.pageSize;
+
+    var params = new URLSearchParams({
+      days: days, limit: state.pageSize, offset: offset
+    });
+    if (module) params.set("module", module);
+    if (action) params.set("action", action);
+    if (status) params.set("status", status);
+
+    try {
+      var r = await fetch(API + "/audit/logs?" + params.toString());
+      var d = await r.json();
+      if (!d.records) { return; }
+
+      state.total = d.total;
+      var list = document.getElementById("auditList");
+      var frag = document.createDocumentFragment();
+
+      if (d.records.length === 0) {
+        frag.appendChild(createElement("div", { class: "audit-empty" }, "暂无匹配的审计记录"));
+        list.innerHTML = "";
+        list.appendChild(frag);
+      } else {
+        list.innerHTML = "";
+        d.records.forEach(function(ev) {
+          frag.appendChild(buildAuditRow(ev));
+        });
+        list.appendChild(frag);
+      }
+
+      updateAuditPagination();
+      loadAuditStats();
+    } catch(e) {
+      console.error("加载审计日志失败:", e);
+    }
+  };
+
+  function buildAuditRow(ev) {
+    var row = createElement("div", { class: "audit-row" });
+
+    var time = ev.timestamp ? ev.timestamp.replace("T", " ").substring(0, 19) : "-";
+    var statusClass = "audit-status-" + (ev.status || "success");
+    var statusLabel = { "success": "成功", "failed": "失败", "blocked": "已拦截" }[ev.status] || ev.status;
+    var moduleLabel = {
+      "ota_recon": "OTA对账", "card_recon": "信用卡对账", "aging": "账龄分析",
+      "ctrip": "携程佣金", "invoice": "发票管理", "scheduler": "智能调度",
+      "files": "文件管理", "config": "系统配置", "chat": "AI对话", "api": "API请求"
+    }[ev.module] || ev.module;
+    var actionLabel = {
+      "upload": "上传", "match": "匹配", "confirm": "确认", "approve": "通过",
+      "reject": "驳回", "delete": "删除", "export": "导出", "start": "启动",
+      "preview": "预览", "post": "POST", "get": "GET", "cancel": "取消",
+      "cleanup": "清理"
+    }[ev.action] || ev.action;
+    var duration = ev.duration_ms ? (ev.duration_ms >= 1000 ? (ev.duration_ms/1000).toFixed(1)+"s" : ev.duration_ms+"ms") : "-";
+
+    row.innerHTML =
+      '<span class="audit-col-time">' + escapeHtml(time) + '</span>' +
+      '<span class="audit-col-user">' + escapeHtml(ev.user || "system") + '</span>' +
+      '<span class="audit-col-module">' + escapeHtml(moduleLabel) + '</span>' +
+      '<span class="audit-col-action">' + escapeHtml(actionLabel) + '</span>' +
+      '<span class="audit-col-detail" title="' + escapeHtml(ev.detail || "") + '">' + escapeHtml(ev.detail || "") + '</span>' +
+      '<span class="audit-col-status"><span class="' + statusClass + '">' + statusLabel + '</span></span>' +
+      '<span class="audit-col-duration">' + duration + '</span>';
+
+    return row;
+  }
+
+  function updateAuditPagination() {
+    var state = window._auditState;
+    var totalPages = Math.ceil(state.total / state.pageSize);
+    var pagination = document.getElementById("auditPagination");
+    var pageInfo = document.getElementById("auditPageInfo");
+    var prevBtn = document.getElementById("auditPrevBtn");
+    var nextBtn = document.getElementById("auditNextBtn");
+
+    if (totalPages <= 1) {
+      pagination.style.display = "none";
+      return;
+    }
+
+    pagination.style.display = "flex";
+    pageInfo.textContent = "第 " + (state.page + 1) + " / " + totalPages + " 页，共 " + state.total + " 条";
+    prevBtn.disabled = state.page <= 0;
+    nextBtn.disabled = state.page >= totalPages - 1;
+  }
+
+  window.auditPrevPage = function() {
+    if (window._auditState.page > 0) {
+      window._auditState.page--;
+      window.loadAuditLogs();
+    }
+  };
+
+  window.auditNextPage = function() {
+    var totalPages = Math.ceil(window._auditState.total / window._auditState.pageSize);
+    if (window._auditState.page < totalPages - 1) {
+      window._auditState.page++;
+      window.loadAuditLogs();
+    }
+  };
+
+  window.loadAuditStats = async function() {
+    var days = document.getElementById("auditDaysFilter").value;
+    try {
+      var r = await fetch(API + "/audit/stats?days=" + days);
+      var d = await r.json();
+      document.getElementById("auditTotal").textContent = d.total || 0;
+      document.getElementById("auditSuccess").textContent = (d.by_status && d.by_status.success) || 0;
+      document.getElementById("auditFailed").textContent = (d.by_status && d.by_status.failed) || 0;
+      var userCount = d.by_user ? Object.keys(d.by_user).length : 0;
+      document.getElementById("auditUsers").textContent = userCount;
+    } catch(e) {
+      console.error("加载审计统计失败:", e);
+    }
+  };
+
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function createElement(tag, attrs, text) {
+    var el = document.createElement(tag);
+    if (attrs) { for (var k in attrs) { el.setAttribute(k, attrs[k]); } }
+    if (text) { el.textContent = text; }
+    return el;
+  }
+
   // ===== Health =====
   async function checkHealth() {
     try { var r = await fetch(API + "/health"), d = await r.json();

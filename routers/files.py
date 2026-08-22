@@ -8,6 +8,7 @@ from starlette.responses import FileResponse
 from deps import UPLOAD_DIR, OUTPUT_DIR, is_safe_path, logger
 from schemas import FileDeleteRequest
 from tools.doc_parser import get_info, detect_ota_channel, validate
+from utils.audit_logger import audit
 
 router = APIRouter(prefix="/api", tags=["files"])
 
@@ -58,6 +59,10 @@ async def delete_file(req: FileDeleteRequest):
             shutil.rmtree(fp)
         else:
             fp.unlink()
+
+        audit.log("files", "delete", f"文件删除: {fp.name}",
+                  context={"path": str(fp), "is_dir": fp.is_dir()})
+
         return {"ok": True, "message": f"已删除: {fp.name}"}
 
     except HTTPException:
@@ -221,5 +226,11 @@ async def validate_uploaded_file(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Validate error: {e}")
         result["error"] = f"文件解析失败: {str(e)}"
+
+    audit.log("files", "upload", f"文件上传: {file.filename} → {result['file_kind'] or '未识别'}",
+              context={"filename": file.filename, "file_kind": result["file_kind"],
+                       "valid": result["valid"], "size": result["size"],
+                       "error": result["error"]},
+              status="success" if result["valid"] else "failed")
 
     return result
