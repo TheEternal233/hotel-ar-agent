@@ -29,10 +29,11 @@ def _cleanup_uploads(paths):
 def _process_single_channel(ota_path, pms_path, channel):
     if channel == "向蜜鸟":
         target = ota_path if os.path.exists(ota_path) else pms_path
-        xmn_wb = openpyxl.load_workbook(target, data_only=False)
+        ota_records, card_records, rezen_records = read_xiangminiao(target)
+        results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
+        # 向蜜鸟单文件，预加载 wb 避免 _init_workbook 重复读取
+        xmn_wb = openpyxl.load_workbook(ota_path, data_only=False)
         try:
-            ota_records, card_records, rezen_records = read_xiangminiao(target, wb=xmn_wb)
-            results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
             report_path = _generate_ar_report(
                 results, stats, channel, ota_path, pms_path,
                 ota_wb=xmn_wb, pms_wb=xmn_wb,

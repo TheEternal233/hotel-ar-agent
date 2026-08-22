@@ -7,6 +7,7 @@
 - 线程安全，多并发环境下不丢失记录
 - 与现有 approval_store.py 保持一致的 JSONL 格式
 - 提供结构化查询接口
+- 按模块/动作/状态/用户建立索引，加速查询过滤
 
 使用方式：
     from utils.audit_engine import audit
@@ -30,6 +31,9 @@ from enums.paths import BASE_DIR
 
 AUDIT_DIR = os.path.join(BASE_DIR, "data", "audit")
 
+# 索引文件名后缀
+INDEX_SUFFIX = ".idx.json"
+
 
 class AuditLogger:
     """审计日志记录器（单例模式，线程安全）"""
@@ -50,11 +54,84 @@ class AuditLogger:
         self._write_lock = threading.Lock()
         os.makedirs(AUDIT_DIR, exist_ok=True)
 
-    # ────────── 写入 ──────────
+    # ────────── 内部工具 ──────────
 
     @staticmethod
     def _today_file() -> str:
         return os.path.join(AUDIT_DIR, f"audit_{datetime.now():%Y%m%d}.jsonl")
+
+    @staticmethod
+    def _index_file(log_file: str) -> str:
+        """根据日志文件路径生成对应的索引文件路径"""
+        return log_file + INDEX_SUFFIX
+
+    def _build_index(self, log_file: str) -> dict:
+        """
+        为单个日志文件构建索引。
+        索引结构：{ "module": { "ota_recon": [0, 120, 350, ...], ... }, "action": {...}, "status": {...}, "user": {...} }
+        value 为字节偏移量列表，指向日志文件中对应记录的起始位置。
+        """
+        index = {"module": {}, "action": {}, "status": {}, "user": {}}
+        if not os.path.exists(log_file):
+            return index
+        try:
+            with open(log_file, "r", encoding="utf-8") as f:
+                offset = 0
+                for line in f:
+                    line_stripped = line.strip()
+                    if not line_stripped:
+                        offset += len(line.encode("utf-8"))
+                        continue
+                    try:
+                        event = json.loads(line_stripped)
+                    except json.JSONDecodeError:
+                        offset += len(line.encode("utf-8"))
+                        continue
+
+                    # 为每个维度建立索引
+                    for dim in ("module", "action", "status", "user"):
+                        val = event.get(dim, "")
+                        if val:
+                            index[dim].setdefault(val, []).append(offset)
+
+                    offset += len(line.encode("utf-8"))
+        except OSError:
+            pass
+        return index
+
+    def _save_index(self, log_file: str, index: dict) -> None:
+        """将索引写入磁盘"""
+        idx_file = self._index_file(log_file)
+        try:
+            with open(idx_file, "w", encoding="utf-8") as f:
+                json.dump(index, f, ensure_ascii=False)
+        except OSError:
+            pass
+
+    def _load_index(self, log_file: str) -> Optional[dict]:
+        """从磁盘加载索引，如果不存在或过期则返回 None"""
+        idx_file = self._index_file(log_file)
+        try:
+            # 检查索引是否比日志文件新
+            log_mtime = os.path.getmtime(log_file)
+            idx_mtime = os.path.getmtime(idx_file)
+            if idx_mtime < log_mtime:
+                return None  # 索引过期，需要重建
+
+            with open(idx_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _get_or_build_index(self, log_file: str) -> dict:
+        """获取索引（优先从磁盘加载，否则重建并缓存）"""
+        index = self._load_index(log_file)
+        if index is None:
+            index = self._build_index(log_file)
+            self._save_index(log_file, index)
+        return index
+
+    # ────────── 写入 ──────────
 
     def log(
         self,
@@ -98,8 +175,18 @@ class AuditLogger:
         }
 
         with self._write_lock:
-            with open(self._today_file(), "a", encoding="utf-8") as f:
+            log_file = self._today_file()
+            # 追加写入日志
+            with open(log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+            # 删除过期的索引文件（下次查询时会自动重建）
+            idx_file = self._index_file(log_file)
+            if os.path.exists(idx_file):
+                try:
+                    os.remove(idx_file)
+                except OSError:
+                    pass
 
         return event_id
 
@@ -117,6 +204,9 @@ class AuditLogger:
         offset: int = 0,
     ) -> list[dict]:
         """查询审计日志，按时间倒序。
+
+        优化：当查询条件包含 module/action/status/user 时，
+        使用索引文件快速定位匹配记录，避免逐行解析所有日志。
 
         Args:
             module:  按模块过滤，空字符串表示不过滤
@@ -151,30 +241,76 @@ class AuditLogger:
                 continue
 
             filepath = os.path.join(AUDIT_DIR, filename)
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
+
+            # 判断是否能使用索引加速
+            # 条件：至少有一个过滤字段非空，且该字段有索引
+            use_index = False
+            filter_dims = []
+            if module:
+                filter_dims.append(("module", module))
+            if action:
+                filter_dims.append(("action", action))
+            if status:
+                filter_dims.append(("status", status))
+            if user:
+                filter_dims.append(("user", user))
+
+            if filter_dims:
+                use_index = True
+                index = self._get_or_build_index(filepath)
+                # 取交集：找出同时满足所有过滤条件的偏移量
+                candidate_offsets = None
+                for dim, val in filter_dims:
+                    dim_offsets = set(index.get(dim, {}).get(val, []))
+                    if candidate_offsets is None:
+                        candidate_offsets = dim_offsets
+                    else:
+                        candidate_offsets &= dim_offsets
+                    if not candidate_offsets:
+                        break  # 交集为空，无需继续
+
+                if candidate_offsets:
+                    # 按偏移量排序，顺序读取
+                    for offset in sorted(candidate_offsets):
                         try:
-                            event = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
+                            with open(filepath, "r", encoding="utf-8") as f:
+                                f.seek(offset)
+                                line = f.readline()
+                                if line:
+                                    try:
+                                        event = json.loads(line.strip())
+                                        records.append(event)
+                                    except json.JSONDecodeError:
+                                        pass
+                        except OSError:
+                            pass
+            
+            if not use_index or not filter_dims:
+                # 无过滤条件或索引未命中，回退到全文件扫描
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                event = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
 
-                        # 过滤
-                        if module and event.get("module") != module:
-                            continue
-                        if action and event.get("action") != action:
-                            continue
-                        if user and event.get("user") != user:
-                            continue
-                        if status and event.get("status") != status:
-                            continue
+                            # 过滤
+                            if module and event.get("module") != module:
+                                continue
+                            if action and event.get("action") != action:
+                                continue
+                            if user and event.get("user") != user:
+                                continue
+                            if status and event.get("status") != status:
+                                continue
 
-                        records.append(event)
-            except OSError:
-                continue
+                            records.append(event)
+                except OSError:
+                    continue
 
         # 按时间倒序
         records.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
@@ -270,6 +406,13 @@ class AuditLogger:
                 with self._write_lock:
                     with open(filepath, "w", encoding="utf-8") as f:
                         f.writelines(new_lines)
+                    # 删除索引文件，下次查询自动重建
+                    idx_file = self._index_file(filepath)
+                    if os.path.exists(idx_file):
+                        try:
+                            os.remove(idx_file)
+                        except OSError:
+                            pass
                 return True
 
         return False
@@ -306,6 +449,13 @@ class AuditLogger:
                     deleted += 1
                 except OSError:
                     pass
+                # 同时删除对应的索引文件
+                idx_file = self._index_file(filepath)
+                if os.path.exists(idx_file):
+                    try:
+                        os.remove(idx_file)
+                    except OSError:
+                        pass
 
         return deleted
 
