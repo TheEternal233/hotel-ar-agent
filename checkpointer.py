@@ -167,6 +167,11 @@ class JsonFileSaver(BaseCheckpointSaver):
         # blobs: (thread_id, checkpoint_ns, channel, version) -> (type, bytes)
         for key_str, (typ, val_b64) in data.get("blobs", {}).items():
             tid, ns, ch, ver = self._unpack_key(key_str)
+            # version 在 checkpoint 中是 int，但反序列化后可能是 str，统一转为 int 以匹配
+            try:
+                ver = int(ver)
+            except (ValueError, TypeError):
+                pass
             result["blobs"][(tid, ns, ch, ver)] = (typ, self._from_b64(val_b64))
         return result
 

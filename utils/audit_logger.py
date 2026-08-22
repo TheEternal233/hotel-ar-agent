@@ -226,6 +226,54 @@ class AuditLogger:
             "by_user": by_user,
         }
 
+    # ────────── 删除 ──────────
+
+    def delete_by_id(self, event_id: str) -> bool:
+        """按 ID 删除单条审计日志。
+
+        Args:
+            event_id: 审计事件 ID
+
+        Returns:
+            bool: 是否删除成功
+        """
+        if not os.path.exists(AUDIT_DIR):
+            return False
+
+        deleted = False
+        for filename in os.listdir(AUDIT_DIR):
+            if not filename.startswith("audit_") or not filename.endswith(".jsonl"):
+                continue
+            filepath = os.path.join(AUDIT_DIR, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+            except OSError:
+                continue
+
+            new_lines = []
+            for line in lines:
+                line_stripped = line.strip()
+                if not line_stripped:
+                    continue
+                try:
+                    event = json.loads(line_stripped)
+                except json.JSONDecodeError:
+                    new_lines.append(line)
+                    continue
+                if event.get("id") == event_id:
+                    deleted = True
+                    continue
+                new_lines.append(line)
+
+            if deleted:
+                with self._write_lock:
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.writelines(new_lines)
+                return True
+
+        return False
+
     # ────────── 清理 ──────────
 
     def cleanup(self, retain_days: int = 90) -> int:

@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 import asyncio
 
@@ -8,6 +9,8 @@ from langchain_core.messages import HumanMessage
 
 from deps import get_graph, cleanup_uploads, UPLOAD_DIR, is_safe_path, logger
 from schemas import ChatRequest, ChatResponse
+
+MEMORY_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "memory")
 from orchestrator.approval_store import create_approval_item
 from orchestrator.supervisor import ConfidenceAssessor
 
@@ -218,3 +221,120 @@ async def upload_file(file: UploadFile = File(...)):
     with open(file_path, "wb") as f:
         f.write(await file.read())
     return {"filename": file.filename, "path": str(file_path), "size": file_path.stat().st_size}
+
+
+# ========== 对话历史管理 ==========
+
+@router.get("/chat/threads")
+async def list_threads():
+    """列出所有对话历史。"""
+    threads = []
+    if not os.path.exists(MEMORY_DIR):
+        return {"threads": threads}
+
+    for filename in os.listdir(MEMORY_DIR):
+        if not filename.endswith(".json"):
+            continue
+        filepath = os.path.join(MEMORY_DIR, filename)
+        thread_id = filename[:-5]  # 去掉 .json
+        mtime = os.path.getmtime(filepath)
+
+        # 尝试提取首条用户内容作为预览
+        preview = ""
+        try:
+            import base64, msgpack as _msgpack
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            blobs = data.get("blobs", {})
+            for key, val in blobs.items():
+                if val[0] != "msgpack":
+                    continue
+                b = base64.b64decode(val[1])
+                try:
+                    decoded = _msgpack.unpackb(b, raw=False, strict_map_key=False)
+                except Exception:
+                    continue
+                if not isinstance(decoded, list):
+                    continue
+                for item in decoded:
+                    if not isinstance(item, _msgpack.ExtType):
+                        continue
+                    try:
+                        inner = _msgpack.unpackb(item.data, raw=False, strict_map_key=False)
+                    except Exception:
+                        continue
+                    if not (isinstance(inner, (list, tuple)) and len(inner) >= 3):
+                        continue
+                    msg_dict = inner[2]
+                    if not isinstance(msg_dict, dict):
+                        continue
+                    msg_type = msg_dict.get("type", "")
+                    content = msg_dict.get("content", "")
+                    # 优先取 human（用户）消息作为预览
+                    if msg_type == "human" and content and len(str(content)) >= 1:
+                        preview = str(content)[:60]
+                        break
+                    # 如果没有 human 消息，取第一个有意义的 ai 消息
+                    if not preview and msg_type == "ai" and content and len(str(content)) >= 2:
+                        preview = str(content)[:60]
+                if preview:
+                    break
+        except Exception as e:
+            logger.warning(f"提取对话预览失败 {thread_id}: {e}")
+
+        threads.append({
+            "thread_id": thread_id,
+            "updated": mtime,
+            "preview": preview,
+        })
+
+    threads.sort(key=lambda t: t["updated"], reverse=True)
+    return {"threads": threads}
+
+
+@router.get("/chat/threads/{thread_id}/messages")
+async def get_thread_messages(thread_id: str):
+    """获取指定对话的消息列表。"""
+    try:
+        graph = get_graph()
+        cfg = {"configurable": {"thread_id": thread_id}}
+        state = await graph.aget_state(cfg)
+        if state is None or not state.values:
+            return {"messages": []}
+
+        messages = state.values.get("messages", [])
+        result = []
+        for msg in messages:
+            role = "system"
+            content = ""
+            if hasattr(msg, "type"):
+                role = msg.type
+            if hasattr(msg, "content"):
+                content = msg.content
+            if isinstance(content, list):
+                content = "".join(
+                    c.get("text", "") if isinstance(c, dict) else str(c)
+                    for c in content
+                )
+            result.append({
+                "role": role,
+                "content": str(content) if content else "",
+            })
+
+        return {"messages": result}
+    except Exception as e:
+        logger.warning(f"获取对话消息失败 thread={thread_id}: {e}")
+        return {"messages": []}
+
+
+@router.delete("/chat/threads/{thread_id}")
+async def delete_thread(thread_id: str):
+    """删除指定对话。"""
+    safe_id = "".join(c for c in thread_id if c.isalnum() or c in "_-").rstrip()
+    if not safe_id:
+        raise HTTPException(status_code=400, detail="无效的对话ID")
+    filepath = os.path.join(MEMORY_DIR, f"{safe_id}.json")
+    if os.path.exists(filepath):
+        os.remove(filepath)
+        return {"deleted": True, "thread_id": thread_id}
+    return {"deleted": False, "thread_id": thread_id, "reason": "文件不存在"}

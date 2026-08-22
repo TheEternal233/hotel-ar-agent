@@ -32,20 +32,30 @@
 <!-- Chat Panel -->
 <section id="panel-chat" class="panel active">
   <div class="panel-header"><h2>AI 智能对话</h2><span class="hint">输入需求：对账、账龄分析、携程佣金、信用卡对账、发票管理...</span></div>
-  <div class="chat-container">
-    <div class="chat-messages" id="chatMessages">
-      <div class="msg system"><div class="msg-content">欢迎使用酒店应收会计AI智能体系统。我可以帮您：OTA对账 / 账龄分析 / 携程佣金 / 信用卡对账 / 协议客户对账 / 发票管理 / 环境验证。请直接输入需求或上传文件后开始。</div></div>
-    </div>
-    <div class="chat-input-area">
-      <div class="upload-bar">
-        <button class="btn-sm" onclick="document.getElementById('fileInput').click()">上传文件</button>
-        <input type="file" id="fileInput" multiple hidden onchange="handleUpload(event)">
-        <span id="uploadStatus"></span>
+  <div class="chat-layout">
+    <div class="chat-history" id="chatHistory">
+      <div class="chat-history-header">
+        <span>对话历史</span>
         <button class="btn-sm btn-new-chat" onclick="newChat()" title="开始新对话">+ 新对话</button>
       </div>
-      <div class="input-row">
-        <textarea id="chatInput" placeholder="输入需求，例如：对账、账龄分析..." rows="2"></textarea>
-        <button class="btn-primary" onclick="sendMessage()">发送</button>
+      <div class="chat-history-list" id="chatHistoryList">
+        <div class="chat-history-empty">暂无历史对话</div>
+      </div>
+    </div>
+    <div class="chat-main">
+      <div class="chat-messages" id="chatMessages">
+        <div class="msg system"><div class="msg-content">欢迎使用酒店应收会计AI智能体系统。我可以帮您：OTA对账 / 账龄分析 / 携程佣金 / 信用卡对账 / 协议客户对账 / 发票管理 / 环境验证。请直接输入需求或上传文件后开始。</div></div>
+      </div>
+      <div class="chat-input-area">
+        <div class="upload-bar">
+          <button class="btn-sm" onclick="document.getElementById('fileInput').click()">上传文件</button>
+          <input type="file" id="fileInput" multiple hidden onchange="handleUpload(event)">
+          <span id="uploadStatus"></span>
+        </div>
+        <div class="input-row">
+          <textarea id="chatInput" placeholder="输入需求，例如：对账、账龄分析..." rows="2"></textarea>
+          <button class="btn-primary" onclick="sendMessage()">发送</button>
+        </div>
       </div>
     </div>
   </div>
@@ -450,6 +460,7 @@
         <span class="audit-col-detail">详情</span>
         <span class="audit-col-status">状态</span>
         <span class="audit-col-duration">耗时</span>
+        <span class="audit-col-del">删除</span>
       </div>
       <div class="audit-list" id="auditList">
         <div class="audit-empty">点击「查询」加载审计日志</div>

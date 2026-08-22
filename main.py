@@ -22,7 +22,7 @@ def _print_messages(messages,prefix=""):
 
 def _run_serve():
     import uvicorn
-    uvicorn.run("serve:app",host="127.0.0.1",port=9000,reload=True)
+    uvicorn.run("serve:app",host="127.0.0.1",port=9000,reload=False)
 
 
 def _run_oneshot(task:str,file_path:str):
@@ -82,20 +82,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,4 +1,5 @@
 """酒店应收会计AI智能体 — FastAPI Web服务 + 静态前端 + 专用模块端点"""
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -13,10 +14,31 @@ from deps import FRONTEND_DIR, logger
 from routers import chat, ota, aging, card, ctrip, invoice, config, scheduler, files, audit
 
 
+async def _audit_cleanup_daemon():
+    """后台定时清理审计日志：每天凌晨 3 点删除 7 天前的记录。"""
+    while True:
+        now = time.localtime()
+        # 计算到凌晨 3 点的秒数
+        seconds_until_3am = (3 - now.tm_hour) * 3600 - now.tm_min * 60 - now.tm_sec
+        if seconds_until_3am <= 0:
+            seconds_until_3am += 86400  # 已经过了 3 点，等明天
+        await asyncio.sleep(seconds_until_3am)
+
+        try:
+            from utils.audit_logger import audit as audit_logger
+            deleted = audit_logger.cleanup(retain_days=7)
+            if deleted > 0:
+                logger.info(f"审计日志自动清理: 删除 {deleted} 个超过 7 天的文件")
+        except Exception as e:
+            logger.warning(f"审计日志自动清理失败: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("酒店应收会计AI智能体服务启动 http://127.0.0.1:8000")
+    cleanup_task = asyncio.create_task(_audit_cleanup_daemon())
     yield
+    cleanup_task.cancel()
     logger.info("服务关闭")
 
 

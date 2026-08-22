@@ -6,6 +6,12 @@
   const API = "/api";
   const uploadedFiles = [];
 
+  // 对话线程ID
+  var _chatThreadId = localStorage.getItem("ar_chat_thread_id") || null;
+
+  // 初始加载对话历史
+  loadChatHistory();
+
   // ===== Navigation =====
   function switchPanel(name) {
     console.log("[AR] -> " + name);
@@ -25,6 +31,7 @@
     var panel = document.getElementById("panel-" + name);
     if (panel) {
       panel.classList.add("active");
+      if (name === "chat") loadChatHistory();
       console.log("[AR] panel active:", "panel-" + name);
     } else {
       console.error("[AR] panel not found:", "panel-" + name);
@@ -66,7 +73,6 @@
   }
 
   // Chat API (only for AI dialog)
-  var _chatThreadId = localStorage.getItem("ar_chat_thread_id") || null;
   async function callChat(message) {
     if (!_chatThreadId) {
       _chatThreadId = "web-" + Date.now();
@@ -121,8 +127,91 @@
     _chatThreadId = null;
     document.getElementById("chatMessages").innerHTML =
       '<div class="msg system"><div class="msg-content">欢迎使用酒店应收会计AI智能体系统。我可以帮您：OTA对账 / 账龄分析 / 携程佣金 / 信用卡对账 / 协议客户对账 / 发票管理 / 环境验证。请直接输入需求或上传文件后开始。</div></div>';
+    loadChatHistory();
   }
   window.newChat = newChat;
+
+  async function loadChatHistory() {
+    try {
+      var r = await fetch(API + "/chat/threads");
+      var d = await r.json();
+      var list = document.getElementById("chatHistoryList");
+      if (!d.threads || d.threads.length === 0) {
+        list.innerHTML = '<div class="chat-history-empty">暂无历史对话</div>';
+        return;
+      }
+      var html = "";
+      var activeId = _chatThreadId;
+      d.threads.forEach(function(t) {
+        var isActive = activeId && t.thread_id === activeId;
+        var time = formatTimeAgo(t.updated);
+        var dt = new Date(t.updated * 1000);
+        var timeStr = dt.getFullYear() + "-" + String(dt.getMonth()+1).padStart(2,"0") + "-" + String(dt.getDate()).padStart(2,"0") + " " + String(dt.getHours()).padStart(2,"0") + ":" + String(dt.getMinutes()).padStart(2,"0");
+        html += '<div class="chat-history-item' + (isActive ? ' active' : '') + '" onclick="switchThread(\'' + escapeHtml(t.thread_id) + '\')">' +
+          '<div class="chat-history-item-preview">' + escapeHtml(timeStr) + '</div>' +
+          '<div class="chat-history-item-meta">' +
+            '<span class="chat-history-item-time">' + time + '</span>' +
+            '<button class="chat-history-del" onclick="event.stopPropagation();deleteThread(\'' + escapeHtml(t.thread_id) + '\')" title="删除此对话">✕</button>' +
+          '</div>' +
+        '</div>';
+      });
+      list.innerHTML = html;
+    } catch(e) {
+      console.error("加载对话历史失败:", e);
+    }
+  }
+  window.loadChatHistory = loadChatHistory;
+
+  async function switchThread(threadId) {
+    _chatThreadId = threadId;
+    localStorage.setItem("ar_chat_thread_id", threadId);
+    document.getElementById("chatMessages").innerHTML = '<div class="msg system"><div class="msg-content">加载中...</div></div>';
+    loadChatHistory();
+    try {
+      var r = await fetch(API + "/chat/threads/" + encodeURIComponent(threadId) + "/messages");
+      var d = await r.json();
+      var container = document.getElementById("chatMessages");
+      container.innerHTML = "";
+      if (!d.messages || d.messages.length === 0) {
+        container.innerHTML = '<div class="msg system"><div class="msg-content">该对话暂无消息记录</div></div>';
+        return;
+      }
+      d.messages.forEach(function(m) {
+        var role = m.role === "human" ? "user" : (m.role === "ai" ? "ai" : "system");
+        addMsg(role, m.content);
+      });
+    } catch(e) {
+      console.error("加载对话消息失败:", e);
+    }
+  }
+  window.switchThread = switchThread;
+
+  async function deleteThread(threadId) {
+    if (!confirm("确定删除此对话？删除后不可恢复。")) return;
+    try {
+      var r = await fetch(API + "/chat/threads/" + encodeURIComponent(threadId), { method: "DELETE" });
+      var d = await r.json();
+      if (d.deleted) {
+        if (_chatThreadId === threadId) {
+          newChat();
+        } else {
+          loadChatHistory();
+        }
+      }
+    } catch(e) {
+      alert("删除失败: " + e.message);
+    }
+  }
+  window.deleteThread = deleteThread;
+
+  function formatTimeAgo(ts) {
+    var diff = (Date.now() - ts * 1000) / 1000;
+    if (diff < 60) return "刚刚";
+    if (diff < 3600) return Math.floor(diff / 60) + "分钟前";
+    if (diff < 86400) return Math.floor(diff / 3600) + "小时前";
+    if (diff < 604800) return Math.floor(diff / 86400) + "天前";
+    return new Date(ts * 1000).toLocaleDateString("zh-CN");
+  }
 
   async function streamChat(msg, filePaths) {
     addMsg("system", "思考中...", "think");
@@ -179,7 +268,7 @@
     document.getElementById("chatMessages").appendChild(sd); }
   function updateStream(c) { if (sd) { sd.querySelector(".msg-content").textContent = c;
     document.getElementById("chatMessages").scrollTop = document.getElementById("chatMessages").scrollHeight; }}
-  function finalizeStream(c) { if (c) updateStream(c); sd = null; }
+  function finalizeStream(c) { if (c) updateStream(c); sd = null; loadChatHistory(); }
   function addMsg(role, content, id) {
     var c = document.getElementById("chatMessages"), d = document.createElement("div");
     d.className = "msg " + role; if (id) d.id = id;
@@ -1087,7 +1176,8 @@
       '<span class="audit-col-action">' + escapeHtml(actionLabel) + '</span>' +
       '<span class="audit-col-detail" title="' + escapeHtml(ev.detail || "") + '">' + escapeHtml(ev.detail || "") + '</span>' +
       '<span class="audit-col-status"><span class="' + statusClass + '">' + statusLabel + '</span></span>' +
-      '<span class="audit-col-duration">' + duration + '</span>';
+      '<span class="audit-col-duration">' + duration + '</span>' +
+      '<span class="audit-col-del"><button class="audit-del-btn" onclick="deleteAuditLog(\'' + escapeHtml(ev.id) + '\')" title="删除此条记录">✕</button></span>';
 
     return row;
   }
@@ -1123,6 +1213,21 @@
     if (window._auditState.page < totalPages - 1) {
       window._auditState.page++;
       window.loadAuditLogs();
+    }
+  };
+
+  window.deleteAuditLog = async function(eventId) {
+    if (!confirm("确定要删除这条审计日志吗？删除后不可恢复。")) return;
+    try {
+      var r = await fetch(API + "/audit/logs/" + encodeURIComponent(eventId), { method: "DELETE" });
+      var d = await r.json();
+      if (d.deleted) {
+        window.loadAuditLogs();
+      } else {
+        alert("删除失败: " + (d.reason || "未知错误"));
+      }
+    } catch(e) {
+      alert("删除失败: " + e.message);
     }
   };
 

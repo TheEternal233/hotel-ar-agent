@@ -59,6 +59,15 @@ async def list_modules():
     }
 
 
+@router.delete("/logs/{event_id}")
+async def delete_log(event_id: str):
+    """删除单条审计日志。"""
+    ok = audit.delete_by_id(event_id)
+    if ok:
+        return {"deleted": True, "event_id": event_id}
+    return {"deleted": False, "event_id": event_id, "reason": "未找到该记录"}
+
+
 @router.post("/cleanup")
 async def cleanup_audit_logs(retain_days: int = Query(90, ge=30, le=365)):
     """清理过期审计日志（管理员操作）。"""
