@@ -30,12 +30,15 @@ def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
         return None
 
     if channel == "向蜜鸟":
+        xmn_wb = None
         try:
-            ota_records, card_records, rezen_records = read_xiangminiao(ota_path)
+            xmn_wb = openpyxl.load_workbook(ota_path, data_only=False)
+            ota_records, card_records, rezen_records = read_xiangminiao(ota_path, wb=xmn_wb)
         except Exception as e:
+            if xmn_wb is not None:
+                xmn_wb.close()
             return f"向蜜鸟({ota_file}): 读取失败 - {e}"
         results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
-        xmn_wb = openpyxl.load_workbook(ota_path, data_only=False)
         try:
             report_path = _generate_ar_report(
                 results, stats, channel, ota_path, ota_path,

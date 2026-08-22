@@ -62,13 +62,19 @@ def _copy_sheet_to_wb(src_ws, dst_wb, title=None):
 
 
 
-def read_xiangminiao(path):
+def read_xiangminiao(path, wb=None):
     """读取向蜜鸟对账文件（同文件多sheet）
 
     使用 read_only=True 减少内存占用，因为该函数只读取数据不修改。
     对账文件中的字段通常为原始数值，不涉及公式计算。
+
+    支持传入已加载的 workbook 对象(wb)，避免重复从磁盘加载。
+    调用方负责关闭传入的 workbook。
     """
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    close_wb = False
+    if wb is None:
+        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        close_wb = True
     try:
         def _find_idx(headers_lower, *keywords):
             for kw in keywords:
@@ -202,4 +208,5 @@ def read_xiangminiao(path):
 
         return ota_records, card_records, rezen_records
     finally:
-        wb.close()
+        if close_wb:
+            wb.close()
