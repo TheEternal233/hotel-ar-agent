@@ -4,6 +4,7 @@ from copy import copy
 import openpyxl
 
 from tools.doc_parser import _parse_date
+from utils.file_cache import file_cache
 
 
 def _unique_sheet_name(wb, name):
@@ -62,6 +63,7 @@ def _copy_sheet_to_wb(src_ws, dst_wb, title=None):
 
 
 
+@file_cache
 def read_xiangminiao(path, wb=None):
     """读取向蜜鸟对账文件（同文件多sheet）
 

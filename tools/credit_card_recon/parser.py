@@ -8,9 +8,11 @@ import logging
 
 from tools.doc_parser import read_sheet
 from tools.credit_card_recon.constants import normalize_payment
+from utils.file_cache import file_cache
 
 logger=logging.getLogger(__name__)
 
+@file_cache
 def _read_pms_report(path):
     """读取 PMS报表，按规范付款方式分组。
 
@@ -56,6 +58,7 @@ def _read_pms_report(path):
     return groups
 
 
+@file_cache
 def _read_pos_statement(path):
     """读取 POS机银行流水，按规范付款方式分组。
 
@@ -105,6 +108,7 @@ def _read_pos_statement(path):
         logger.warning("POS流水 因金额解析失败跳过了 %d 条记录",skipped_amt)
     return groups
 
+@file_cache
 def _read_yfd_pms(path,channel_keyword):
     """读取YFD PMS应收后台，按渠道关键词过滤借方记录
 
@@ -156,6 +160,7 @@ def _read_yfd_pms(path,channel_keyword):
 
 
 
+@file_cache
 def _read_yfd_bank(path):
     """
     读取 YFD 银行流水（ALIPAY / WECHAT 通用）。

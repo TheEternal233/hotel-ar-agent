@@ -17,6 +17,8 @@ from datetime import datetime
 import openpyxl
 import xml.etree.ElementTree as ET
 
+from utils.file_cache import file_cache
+
 
 def _open(path, sheet_name=None):
     if not os.path.exists(path):
@@ -47,6 +49,7 @@ def _parse_date(val):
     return None
 
 
+@file_cache
 def read_sheet(path, header_row=1, sheet_name=None, skip_empty=True, start_row=None, wb=None):
     close_wb = False
     if wb is None:
@@ -123,6 +126,7 @@ def read_mapped(path, column_map, header_row=1, sheet_name=None, cast=None):
         wb.close()
 
 
+@file_cache
 def read_rezen(path, header_row=1, sheet_name=None, wb=None):
     close_wb = False
     if wb is None:
@@ -204,6 +208,7 @@ def read_rezen(path, header_row=1, sheet_name=None, wb=None):
             wb.close()
 
 
+@file_cache
 def get_info(path, sheet_name=None):
     wb, ws = _open(path, sheet_name)
     try:
@@ -370,6 +375,7 @@ CARD_MAPPING = {
     "card":   ["card", "卡号", "card_number", "card_no"],
 }
 
+@file_cache
 def read_ota_channel(path, channel_name, sheet_name=None, wb=None):
     cfg = OTA_CHANNEL_MAPPINGS.get(channel_name)
     if not cfg:
@@ -415,6 +421,7 @@ def read_ota_channel(path, channel_name, sheet_name=None, wb=None):
             wb.close()
 
 
+@file_cache
 def detect_ota_channel(path):
     wb, ws = _open(path)
     try:
