@@ -399,32 +399,33 @@ class AuditLogger:
             if not filename.startswith("audit_") or not filename.endswith(".jsonl"):
                 continue
             filepath = os.path.join(AUDIT_DIR, filename)
+            temp_path = filepath + ".tmp"
+
+            found = False
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
+                with open(filepath, "r", encoding="utf-8") as f_in, \
+                     open(temp_path, "w", encoding="utf-8") as f_out:
+                    for line in f_in:
+                        line_stripped = line.strip()
+                        if not line_stripped:
+                            continue
+                        try:
+                            event = json.loads(line_stripped)
+                        except json.JSONDecodeError:
+                            f_out.write(line)
+                            continue
+                        if event.get("id") == event_id:
+                            found = True
+                            continue
+                        f_out.write(line)
             except OSError:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
                 continue
 
-            deleted = False
-            new_lines = []
-            for line in lines:
-                line_stripped = line.strip()
-                if not line_stripped:
-                    continue
-                try:
-                    event = json.loads(line_stripped)
-                except json.JSONDecodeError:
-                    new_lines.append(line)
-                    continue
-                if event.get("id") == event_id:
-                    deleted = True
-                    continue
-                new_lines.append(line)
-
-            if deleted:
+            if found:
                 with self._write_lock:
-                    with open(filepath, "w", encoding="utf-8") as f:
-                        f.writelines(new_lines)
+                    os.replace(temp_path, filepath)
                     idx_file = self._index_file(filepath)
                     if os.path.exists(idx_file):
                         try:
@@ -432,6 +433,9 @@ class AuditLogger:
                         except OSError:
                             pass
                 return True
+            else:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
 
         return False
 
