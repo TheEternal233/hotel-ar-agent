@@ -363,30 +363,22 @@ class AuditLogger:
                 continue
 
             filepath = os.path.join(AUDIT_DIR, filename)
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            event = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
+            index = self._get_or_build_index(filepath)
 
-                        m = event.get("module", "unknown")
-                        a = event.get("action", "unknown")
-                        s = event.get("status", "unknown")
-                        u = event.get("user", "unknown")
+            for m, offsets in index.get("module", {}).items():
+                by_module[m] = by_module.get(m, 0) + len(offsets)
 
-                        by_module[m] = by_module.get(m, 0) + 1
-                        by_action[a] = by_action.get(a, 0) + 1
-                        if s in by_status:
-                            by_status[s] += 1
-                        by_user[u] = by_user.get(u, 0) + 1
-                        total += 1
-            except OSError:
-                pass
+            for a, offsets in index.get("action", {}).items():
+                by_action[a] = by_action.get(a, 0) + len(offsets)
+
+            for s, offsets in index.get("status", {}).items():
+                if s in by_status:
+                    by_status[s] += len(offsets)
+
+            for u, offsets in index.get("user", {}).items():
+                by_user[u] = by_user.get(u, 0) + len(offsets)
+
+            total += sum(len(v) for v in index.get("module", {}).values())
 
         return {
             "total": total,
