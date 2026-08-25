@@ -10,6 +10,7 @@
 """
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 try:
@@ -100,44 +101,45 @@ def batch_card_recon(data_dir=None):
         data_dir = os.path.join(BASE_DIR, "data", "清远", "信用卡对账")
     if not os.path.exists(data_dir):
         return f"错误：数据目录不存在: {data_dir}"
-    files=_classify_files(data_dir)
-    all_results=[]
-    errors=[]
+    files = _classify_files(data_dir)
+    all_results = []
+    errors = []
+
+    tasks = []
 
     # 通用对账
     if files["pms_report"] and files["pos"]:
-        try:
-            all_results.extend(_run_recon(
-                os.path.join(data_dir, files["pms_report"]),
-                os.path.join(data_dir, files["pos"])
-            ))
-        except Exception:
-            logger.exception("通用PMS/POS对账失败")
-            errors.append("通用PMS/POS对账失败")
+        tasks.append(("通用PMS/POS对账", lambda: _run_recon(
+            os.path.join(data_dir, files["pms_report"]),
+            os.path.join(data_dir, files["pos"]),
+        )))
 
     # YFD ALIPAY独立对账
     if files["yfd_alipay_pms"] and files["yfd_alipay_bank"]:
-        try:
-            all_results.append(_run_yfd_recon(
-                os.path.join(data_dir, files["yfd_alipay_pms"]),
-                os.path.join(data_dir, files["yfd_alipay_bank"]),
-                "YFD支付宝", "YFD 支付宝"
-            ))
-        except Exception:
-            logger.exception("YFD支付宝对账失败")
-            errors.append("YFD支付宝对账失败")
+        tasks.append(("YFD支付宝对账", lambda: [_run_yfd_recon(
+            os.path.join(data_dir, files["yfd_alipay_pms"]),
+            os.path.join(data_dir, files["yfd_alipay_bank"]),
+            "YFD支付宝", "YFD 支付宝",
+        )]))
 
     # YFD WECHAT 独立对账
     if files["yfd_wechat_pms"] and files["yfd_wechat_bank"]:
-        try:
-            all_results.append(_run_yfd_recon(
-                os.path.join(data_dir, files["yfd_wechat_pms"]),
-                os.path.join(data_dir, files["yfd_wechat_bank"]),
-                "YFD微信", "YFD 微信"
-            ))
-        except Exception:
-            logger.exception("YFD微信对账失败")
-            errors.append("YFD微信对账失败")
+        tasks.append(("YFD微信对账", lambda: [_run_yfd_recon(
+            os.path.join(data_dir, files["yfd_wechat_pms"]),
+            os.path.join(data_dir, files["yfd_wechat_bank"]),
+            "YFD微信", "YFD 微信",
+        )]))
+
+    if tasks:
+        with ThreadPoolExecutor(max_workers=min(len(tasks), 3)) as executor:
+            future_to_name = {executor.submit(task_fn): name for name, task_fn in tasks}
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    all_results.extend(future.result())
+                except Exception:
+                    logger.exception(f"{name}失败")
+                    errors.append(f"{name}失败")
 
     if not all_results:
         err_detail = "；".join(errors) if errors else "未找到任何可对账的文件组合"
