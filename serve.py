@@ -81,7 +81,8 @@ async def audit_middleware(request: Request, call_next):
             audit_status = "success" if status_code < 400 else "failed"
             client_ip = request.client.host if request.client else ""
 
-            _audit_logger.log(
+            await asyncio.to_thread(
+                _audit_logger.log,
                 module="api",
                 action=method.lower(),
                 detail=f"{method} {path} → {status_code}",
