@@ -69,8 +69,8 @@ async def scheduler_run(mode: str):
     if mode not in ("daily", "monthly"):
         raise HTTPException(status_code=400, detail=f"Unknown mode: {mode}")
 
-    engine = _build_engine(mode)
-    results = await engine.run()
+    with _build_engine(mode) as engine:
+        results = await engine.run()
 
     messages = []
     pending_approvals = []

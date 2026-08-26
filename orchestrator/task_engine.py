@@ -50,17 +50,50 @@ class TaskDef:
     skip_on_upstream_failure: bool = True
 
 class TaskEngine:
-    """智能任务发现 + 拓扑排序 + 并行执行"""
+    """智能任务发现 + 拓扑排序 + 并行执行
+
+    支持 with 语句自动管理线程池生命周期：
+        with TaskEngine() as engine:
+            engine.register(...)
+            results = await engine.run()
+
+    也兼容传统用法（需手动调用 shutdown）：
+        engine = TaskEngine()
+        ...
+        engine.shutdown()
+    """
 
     def __init__(self, run_id: str = "", max_workers: int = None):
         self.tasks: dict[str, TaskDef] = {}
         self.results: dict[str, TaskResult] = {}
         self.run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
-        # 有界线程池，避免默认线程池无界导致资源耗尽
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers or DEFAULT_EXECUTOR_MAX_WORKERS,
-            thread_name_prefix="task_engine"
-        )
+        self._max_workers = max_workers or DEFAULT_EXECUTOR_MAX_WORKERS
+        self._executor: ThreadPoolExecutor | None = None
+
+    def _ensure_executor(self) -> ThreadPoolExecutor:
+        """延迟初始化线程池，避免未使用即创建"""
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._max_workers,
+                thread_name_prefix="task_engine"
+            )
+        return self._executor
+
+    # ── 上下文管理器（同步） ──
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.shutdown()
+        return False
+
+    # ── 异步上下文管理器 ──
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.shutdown()
+        return False
 
 
     def register(self, task: TaskDef):
@@ -275,5 +308,7 @@ class TaskEngine:
         return 0.7
 
     def shutdown(self):
-        """关闭线程池，释放资源"""
-        self._executor.shutdown(wait=True)
+        """关闭线程池，释放资源。可安全多次调用。"""
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None

@@ -25,7 +25,12 @@ TOOLS = [
     with_resilience(batch_scheduler, retries=1, timeout=600),
 ]
 
-SYSTEM_PROMPT = 'You are a hotel AR accounting AI assistant. Use tools to help with reconciliation, aging analysis, credit card matching, etc. Respond in Chinese.'
+SYSTEM_PROMPT = (
+    "You are a hotel AR accounting AI assistant. Use tools to help with reconciliation, aging analysis, "
+    "credit card matching, etc. Respond in Chinese. "
+    "IMPORTANT: Do NOT use any emoji or special symbols (such as ✅, ✓, ⚠️, ❌, ✕, ℹ️, 🔶, 🔷, 📁, etc.) "
+    "in your responses. Use plain text descriptions only."
+)
 
 def agent(state: AgentState) -> dict:
     llm = get_llm()

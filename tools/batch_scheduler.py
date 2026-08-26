@@ -130,7 +130,8 @@ def batch_scheduler(mode: str = "daily") -> str:
     if not engine.tasks:
         return f"当前模式 '{mode}' 没有注册任何任务"
 
-    results = asyncio.run(engine.run())
+    with engine:
+        results = asyncio.run(engine.run())
 
     # ---------- 格式化输出 ----------
     lines = [

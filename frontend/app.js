@@ -47,11 +47,61 @@
     });
   });
 
+  // ===== Toast Notifications =====
+  function showToast(message, type) {
+    type = type || "info";
+    var container = document.getElementById("toast-container");
+    if (!container) return;
+    var icons = { success: "✓", error: "✕", warning: "!", info: "i" };
+    var toast = document.createElement("div");
+    toast.className = "toast toast-" + type;
+    toast.innerHTML = '<span class="toast-icon">' + icons[type] + "</span><span>" + message + "</span>";
+    container.appendChild(toast);
+    setTimeout(function() { toast.remove(); }, 4000);
+  }
+  window.showToast = showToast;
+
+  // ===== Modal Confirm Dialog (replaces native confirm) =====
+  var _modalResolve = null;
+  function showModalConfirm(message) {
+    return new Promise(function(resolve) {
+      _modalResolve = resolve;
+      var overlay = document.getElementById("modal-overlay");
+      var msgEl = document.getElementById("modal-message");
+      var confirmBtn = document.getElementById("modal-confirm");
+      var cancelBtn = document.getElementById("modal-cancel");
+      if (!overlay || !msgEl) { resolve(false); return; }
+      msgEl.textContent = message || "确定执行此操作吗？";
+      overlay.style.display = "flex";
+      function onConfirm() { closeModal(true); }
+      function onCancel() { closeModal(false); }
+      function onKey(e) { if (e.key === "Escape") { closeModal(false); } }
+      function closeModal(result) {
+        overlay.style.display = "none";
+        confirmBtn.removeEventListener("click", onConfirm);
+        cancelBtn.removeEventListener("click", onCancel);
+        document.removeEventListener("keydown", onKey);
+        resolve(result);
+      }
+      confirmBtn.addEventListener("click", onConfirm);
+      cancelBtn.addEventListener("click", onCancel);
+      document.addEventListener("keydown", onKey);
+    });
+  }
+  window.showModalConfirm = showModalConfirm;
+
   // ===== Helpers =====
   function setResult(elId, text) { var el = document.getElementById(elId); if (el) el.textContent = text; }
   function showLoading(elId) { setResult(elId, "处理中..."); }
-  function btnDisable(el, label) { el.disabled = true; el.textContent = label || "处理中..."; }
-  function btnEnable(el, label) { el.disabled = false; el.textContent = label; }
+  function btnDisable(el, label) {
+    el.disabled = true;
+    el.dataset.originalText = el.textContent;
+    el.innerHTML = '<span class="spinner"></span> ' + (label || "处理中...");
+  }
+  function btnEnable(el, label) {
+    el.disabled = false;
+    el.textContent = label || el.dataset.originalText || "确定";
+  }
 
   async function uploadAndGetPath(fileInputId) {
     var input = document.getElementById(fileInputId);
@@ -102,9 +152,14 @@
     for (var i = 0; i < files.length; i++) {
       var f = files[i]; s.textContent = "上传中: " + f.name;
       var fd = new FormData(); fd.append("file", f);
-      var r = await fetch(API + "/upload", { method: "POST", body: fd });
-      var d = await r.json(); uploadedFiles.push(d);
-      addMsg("system", "[已上传] " + f.name + " (" + (d.size/1024).toFixed(1) + "KB)");
+      try {
+        var r = await fetch(API + "/upload", { method: "POST", body: fd });
+        var d = await r.json(); uploadedFiles.push(d);
+        addMsg("system", "[已上传] " + f.name + " (" + (d.size/1024).toFixed(1) + "KB)");
+        showToast("文件上传成功: " + f.name, "success");
+      } catch(err) {
+        showToast("文件上传失败: " + f.name, "error");
+      }
     }
     s.textContent = uploadedFiles.length ? uploadedFiles.length + " 个文件" : "";
     e.target.value = "";
@@ -187,11 +242,13 @@
   window.switchThread = switchThread;
 
   async function deleteThread(threadId) {
-    if (!confirm("确定删除此对话？删除后不可恢复。")) return;
+    var ok = await showModalConfirm("确定删除此对话？删除后不可恢复。");
+    if (!ok) return;
     try {
       var r = await fetch(API + "/chat/threads/" + encodeURIComponent(threadId), { method: "DELETE" });
       var d = await r.json();
       if (d.deleted) {
+        showToast("对话已删除", "success");
         if (_chatThreadId === threadId) {
           newChat();
         } else {
@@ -199,7 +256,7 @@
         }
       }
     } catch(e) {
-      alert("删除失败: " + e.message);
+      showToast("删除失败: " + e.message, "error");
     }
   }
   window.deleteThread = deleteThread;
@@ -266,14 +323,85 @@
     sd = document.createElement("div"); sd.className = "msg system"; sd.id = "stream";
     sd.innerHTML = '<div class="msg-content"></div>';
     document.getElementById("chatMessages").appendChild(sd); }
-  function updateStream(c) { if (sd) { sd.querySelector(".msg-content").textContent = c;
+  function updateStream(c) { if (sd) { sd.querySelector(".msg-content").innerHTML = renderAiContent(c);
     document.getElementById("chatMessages").scrollTop = document.getElementById("chatMessages").scrollHeight; }}
   function finalizeStream(c) { if (c) updateStream(c); sd = null; loadChatHistory(); }
+  function renderAiContent(text) {
+    var html = escapeHtml(text);
+    // Markdown headings: ## → h2, ### → h3
+    html = html.replace(/^#{2}\s+(.+)$/gm, '<h3 class="ai-section-title">$1</h3>');
+    html = html.replace(/^#{3}\s+(.+)$/gm, '<h4 class="ai-sub-title">$1</h4>');
+    // Markdown bold: **text**
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Markdown italic: *text*  (but not inside already-converted tags)
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // Markdown horizontal rule: ---
+    html = html.replace(/^\s*---+\s*$/gm, '<hr class="ai-divider">');
+    // Markdown bullet list: "- " at start of line → <ul><li>
+    var lines = html.split('\n');
+    var inList = false, listHtml = '', outLines = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var bulletMatch = line.match(/^(\s*)-\s+(.+)$/);
+      if (bulletMatch) {
+        if (!inList) { inList = true; listHtml = '<ul>'; }
+        listHtml += '<li>' + bulletMatch[2] + '</li>';
+      } else {
+        if (inList) { outLines.push(listHtml + '</ul>'); inList = false; listHtml = ''; }
+        outLines.push(line);
+      }
+    }
+    if (inList) outLines.push(listHtml + '</ul>');
+    html = outLines.join('\n');
+    // Auto-detect emojis: ✅ ✓ ⚠️ ❌ ✕ ℹ️ → plain emoji (no badge background)
+    html = html.replace(/([✅✓⚠️❌✕ℹ️])/g, '<span class="ai-emoji">$1</span>');
+    // Auto-detect simple markdown tables (lines with | separators)
+    var lines = html.split('\n');
+    var inTable = false, tableHtml = '', result = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (/^\s*\|/.test(line) && /\|\s*$/.test(line)) {
+        if (!inTable) { inTable = true; tableHtml = '<table class="ai-table"><thead><tr>'; }
+        var cells = line.split('|').filter(function(c) { return c.trim() !== ''; });
+        if (cells.length > 0) {
+          if (tableHtml.indexOf('</thead>') === -1 && /^\s*[-|:\s]+$/.test(line.replace(/\|/g,''))) {
+            tableHtml += '</tr></thead><tbody>';
+          } else if (tableHtml.indexOf('</thead>') === -1) {
+            for (var ci = 0; ci < cells.length; ci++) tableHtml += '<th>' + cells[ci].trim() + '</th>';
+            tableHtml += '</tr>';
+          } else {
+            tableHtml += '<tr>';
+            for (var ci = 0; ci < cells.length; ci++) tableHtml += '<td>' + cells[ci].trim() + '</td>';
+            tableHtml += '</tr>';
+          }
+        }
+      } else {
+        if (inTable) { result.push(tableHtml + '</tbody></table>'); inTable = false; tableHtml = ''; }
+        result.push(line);
+      }
+    }
+    if (inTable) result.push(tableHtml + '</tbody></table>');
+    html = result.join('\n');
+    // Auto-detect tip blocks (lines starting with "提示:" or "注意:")
+    html = html.replace(/^(提示|注意|警告|Tip|Note|Warning)[：:]\s*(.+)$/gm, '<div class="ai-tip"><strong>$1:</strong> $2</div>');
+    // Auto-detect result blocks (lines with "结果:" or "报告:")
+    html = html.replace(/^(结果|报告|汇总|结论)[：:]\s*(.+)$/gm, '<div class="ai-result-box"><h4>$1</h4><div class="ai-result-item">$2</div></div>');
+    // Convert newlines to <br> outside of tags
+    html = html.replace(/\n/g, '<br>');
+    return html;
+  }
+
   function addMsg(role, content, id) {
     var c = document.getElementById("chatMessages"), d = document.createElement("div");
     d.className = "msg " + role; if (id) d.id = id;
-    d.innerHTML = '<div class="msg-content">' + content.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</div>";
-    c.appendChild(d); c.scrollTop = c.scrollHeight;
+    d.style.opacity = "0"; d.style.transform = "translateY(6px)"; d.style.transition = "all 0.25s ease";
+    var inner;
+    if (role === "ai") inner = renderAiContent(content);
+    else inner = escapeHtml(content);
+    d.innerHTML = '<div class="msg-content">' + inner + "</div>";
+    c.appendChild(d);
+    requestAnimationFrame(function() { d.style.opacity = "1"; d.style.transform = "translateY(0)"; });
+    c.scrollTop = c.scrollHeight;
   }
 
   var ci = document.getElementById("chatInput");
@@ -865,18 +993,19 @@
       });
       var data = await resp.json();
       if (data.ok) {
-        // 刷新列表
+        showToast(action === "approve" ? "审批已通过" : "审批已驳回", "success");
         loadApprovalQueue();
       } else {
-        alert("操作失败: " + (data.detail || "未知"));
+        showToast("操作失败: " + (data.detail || "未知"), "error");
       }
     } catch(e) {
-      alert("操作失败: " + e.message);
+      showToast("操作失败: " + e.message, "error");
     }
   };
 
   window.deleteApproval = async function(approvalId) {
-    if (!confirm("确定要删除该审批项吗？")) return;
+    var ok = await showModalConfirm("确定要删除该审批项吗？");
+    if (!ok) return;
 
     try {
       var resp = await fetch(API + "/scheduler/approvals/" + approvalId, {
@@ -884,12 +1013,13 @@
       });
       var data = await resp.json();
       if (data.ok) {
+        showToast("审批项已删除", "success");
         loadApprovalQueue();
       } else {
-        alert("删除失败: " + (data.detail || "未知"));
+        showToast("删除失败: " + (data.detail || "未知"), "error");
       }
     } catch(e) {
-      alert("删除失败: " + e.message);
+      showToast("删除失败: " + e.message, "error");
     }
   };
 
@@ -952,7 +1082,7 @@
     div.id = id;
     div.className = "upload-result-card " + status;
     div.innerHTML =
-      '<div class="ur-icon">📄</div>' +
+      '<div class="ur-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></div>' +
       '<div class="ur-body">' +
         '<div class="ur-name">' + name + '</div>' +
         '<div class="ur-meta">' + meta + '</div>' +
@@ -1036,7 +1166,7 @@
         var f = d.files[i];
         if (f.is_dir) {
           html += '<tr>' +
-            '<td class="fname">📁 ' + f.name + '</td>' +
+            '<td class="fname"><span class="file-dir-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></span> ' + f.name + '</td>' +
             '<td>-</td>' +
             '<td>' + f.mtime + '</td>' +
             '<td class="fops">' +
@@ -1065,7 +1195,8 @@
   };
 
   window.deleteFile = async function(filePath, dirType) {
-    if (!confirm("确定删除该文件？")) return;
+    var ok = await showModalConfirm("确定删除该文件？");
+    if (!ok) return;
     try {
       var r = await fetch(API + "/files/delete", {
         method: "POST",
@@ -1074,17 +1205,19 @@
       });
       var d = await r.json();
       if (d.ok) {
+        showToast("文件已删除", "success");
         loadFileList(dirType);
       } else {
-        alert("删除失败: " + (d.detail || "未知"));
+        showToast("删除失败: " + (d.detail || "未知"), "error");
       }
     } catch(e) {
-      alert("删除失败: " + e.message);
+      showToast("删除失败: " + e.message, "error");
     }
   };
 
   window.cleanupDir = async function(dirType) {
-    if (!confirm("确定清空 " + dirType + " 目录下的所有文件？此操作不可恢复！")) return;
+    var ok = await showModalConfirm("确定清空 " + dirType + " 目录下的所有文件？此操作不可恢复！");
+    if (!ok) return;
     try {
       var subPath = window._fileMgrState[dirType] || "";
       var body = {dir_type: dirType};
@@ -1096,12 +1229,13 @@
       });
       var d = await r.json();
       if (d.ok) {
+        showToast("目录已清空", "success");
         loadFileList(dirType, subPath);
       } else {
-        alert("清理失败: " + (d.detail || "未知"));
+        showToast("清理失败: " + (d.detail || "未知"), "error");
       }
     } catch(e) {
-      alert("清理失败: " + e.message);
+      showToast("清理失败: " + e.message, "error");
     }
   };
   // ===== Audit Log =====
@@ -1217,17 +1351,19 @@
   };
 
   window.deleteAuditLog = async function(eventId) {
-    if (!confirm("确定要删除这条审计日志吗？删除后不可恢复。")) return;
+    var ok = await showModalConfirm("确定要删除这条审计日志吗？删除后不可恢复。");
+    if (!ok) return;
     try {
       var r = await fetch(API + "/audit/logs/" + encodeURIComponent(eventId), { method: "DELETE" });
       var d = await r.json();
       if (d.deleted) {
+        showToast("审计日志已删除", "success");
         window.loadAuditLogs();
       } else {
-        alert("删除失败: " + (d.reason || "未知错误"));
+        showToast("删除失败: " + (d.reason || "未知错误"), "error");
       }
     } catch(e) {
-      alert("删除失败: " + e.message);
+      showToast("删除失败: " + e.message, "error");
     }
   };
 
@@ -1282,15 +1418,20 @@ function uploadAndSetPath(fileInputId, hintId) {
             fileInput.dataset.path = d.path;
             hint.textContent = d.path;
             hint.style.color = '#22c55e';
+            if (window.showToast) window.showToast("文件上传成功", "success");
         })
-        .catch(e => { hint.textContent = 'Upload failed'; hint.style.color = '#ef4444'; });
+        .catch(e => {
+            hint.textContent = 'Upload failed';
+            hint.style.color = '#ef4444';
+            if (window.showToast) window.showToast("文件上传失败", "error");
+        });
 }
 
 function runCorpRecon() {
     const hint = document.getElementById('corpPathHint');
     const fileInput = document.getElementById('corpFile');
     const path = fileInput.dataset.path || '';
-    if (!path) { alert('Please upload file first'); return; }
+    if (!path) { if (window.showToast) window.showToast('请先上传文件', 'warning'); return; }
     const res = document.getElementById('corpResult');
     res.innerHTML = '<p>Processing...</p>';
     fetch('/api/corp/recon', {
@@ -1299,8 +1440,8 @@ function runCorpRecon() {
         body: JSON.stringify({ receivable_path: path })
     })
     .then(r => r.json())
-    .then(d => { res.innerHTML = '<pre>' + d.result + '</pre>'; })
-    .catch(e => { res.innerHTML = '<p class="error">Error: ' + e + '</p>'; });
+    .then(d => { res.innerHTML = '<pre>' + d.result + '</pre>'; if (window.showToast) window.showToast('协议客户对账完成', 'success'); })
+    .catch(e => { res.innerHTML = '<p class="error">Error: ' + e + '</p>'; if (window.showToast) window.showToast('处理失败', 'error'); });
 }
 
 function runBatchOta() {
@@ -1360,7 +1501,7 @@ function runBatchAll() {
 function runInvoice() {
     const fileInput = document.getElementById('invoiceFile');
     const path = fileInput.dataset.path || '';
-    if (!path) { alert('Please upload file first'); return; }
+    if (!path) { if (window.showToast) window.showToast('请先上传文件', 'warning'); return; }
     const invType = document.getElementById('invoiceType').value;
     const res = document.getElementById('invoiceResult');
     res.innerHTML = '<p>Generating invoice...</p>';
@@ -1370,6 +1511,6 @@ function runInvoice() {
         body: JSON.stringify({ receivable_path: path, invoice_type: invType })
     })
     .then(r => r.json())
-    .then(d => { res.innerHTML = '<pre>' + d.result + '</pre>'; })
-    .catch(e => { res.innerHTML = '<p class="error">Error: ' + e + '</p>'; });
+    .then(d => { res.innerHTML = '<pre>' + d.result + '</pre>'; if (window.showToast) window.showToast('发票清单生成完成', 'success'); })
+    .catch(e => { res.innerHTML = '<p class="error">Error: ' + e + '</p>'; if (window.showToast) window.showToast('生成失败', 'error'); });
 }
