@@ -18,8 +18,8 @@ from tools.ar_recon.constants import (
 )
 
 # 批量对账最大并行工作线程数
-# Excel 读取是 I/O 密集型任务，线程数可适当提高
-BATCH_MAX_WORKERS = min((os.cpu_count() or 4) * 2, 8)
+# openpyxl 解析是 CPU 密集型任务，线程数不宜超过 CPU 核心数 + 1
+BATCH_MAX_WORKERS = min((os.cpu_count() or 4) + 1, 8)
 
 def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
     """处理单个渠道（用于线程池并行）"""
@@ -30,13 +30,10 @@ def _process_one_channel(data_dir, ota_file, rezen_lookup, rezen_files):
         return None
 
     if channel == "向蜜鸟":
-        try:
-            ota_records, card_records, rezen_records = read_xiangminiao(ota_path)
-        except Exception as e:
-            return f"向蜜鸟({ota_file}): 读取失败 - {e}"
-        results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
         xmn_wb = openpyxl.load_workbook(ota_path, data_only=False)
         try:
+            ota_records, card_records, rezen_records = read_xiangminiao(ota_path, wb=xmn_wb)
+            results, stats = match_xiangminiao(ota_records, rezen_records, card_records)
             report_path = _generate_ar_report(
                 results, stats, channel, ota_path, ota_path,
                 ota_wb=xmn_wb, pms_wb=xmn_wb,

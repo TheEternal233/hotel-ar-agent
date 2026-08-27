@@ -293,8 +293,8 @@ async def list_threads():
 
 
 @router.get("/chat/threads/{thread_id}/messages")
-async def get_thread_messages(thread_id: str):
-    """获取指定对话的消息列表。"""
+async def get_thread_messages(thread_id: str, limit: int = 50):
+    """获取指定对话的消息列表，默认最多返回最近 50 条。"""
     try:
         graph = get_graph()
         cfg = {"configurable": {"thread_id": thread_id}}
@@ -303,6 +303,8 @@ async def get_thread_messages(thread_id: str):
             return {"messages": []}
 
         messages = state.values.get("messages", [])
+        if limit > 0:
+            messages = messages[-limit:]
         result = []
         for msg in messages:
             role = "system"

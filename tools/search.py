@@ -5,10 +5,21 @@ from langchain.tools import tool
 
 load_dotenv()
 
-# 延迟导入 httpx，避免模块加载时产生副作用
+# 模块级全局 AsyncClient，支持连接复用和 HTTP/2
+_httpx_client = None
+
+
 def _get_httpx_client():
-    import httpx
-    return httpx.AsyncClient(timeout=30)
+    """获取全局 AsyncClient 实例（延迟初始化，连接复用）。"""
+    global _httpx_client
+    if _httpx_client is None:
+        import httpx
+        _httpx_client = httpx.AsyncClient(
+            timeout=30,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+        )
+    return _httpx_client
+
 
 @tool
 async def bocha_search(query: str) -> str:
@@ -31,9 +42,9 @@ async def bocha_search(query: str) -> str:
     }
 
     try:
-        async with _get_httpx_client() as client:
-            response = await client.post(url, headers=headers, json=payload)
-            data = response.json()
+        client = _get_httpx_client()
+        response = await client.post(url, headers=headers, json=payload)
+        data = response.json()
 
         if response.status_code != 200:
             return f"搜索失败：{json.dumps(data, ensure_ascii=False)}"

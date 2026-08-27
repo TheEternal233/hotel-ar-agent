@@ -2,18 +2,25 @@ import os
 import threading
 import time
 from functools import wraps
+from collections import OrderedDict
 
 _CACHE_TTL = 300
+_CACHE_MAX_SIZE = 128  # 最大缓存条目数，防止 OOM
 
-_cache = {}
+_cache = OrderedDict()
 _cache_lock = threading.Lock()
 
 
 def _cleanup_expired():
+    """清理过期条目，同时检查总大小并在超限时淘汰最久未使用的条目。"""
     now = time.time()
     expired = [k for k, (_, t) in _cache.items() if now - t > _CACHE_TTL]
     for k in expired:
         del _cache[k]
+
+    # LRU 淘汰：如果仍超出上限，移除最久未使用的条目
+    while len(_cache) > _CACHE_MAX_SIZE:
+        _cache.popitem(last=False)
 
 
 def file_cache(func):
@@ -44,12 +51,18 @@ def file_cache(func):
             if entry is not None:
                 result, cached_time = entry
                 if time.time() - cached_time < _CACHE_TTL:
+                    # 命中缓存，移到末尾标记为最近使用
+                    _cache.move_to_end(cache_key)
                     return result
+                # 已过期，删除
+                del _cache[cache_key]
 
         result = func(*args, **kwargs)
 
         with _cache_lock:
+            # 写入新条目（如果已存在会更新并移到末尾）
             _cache[cache_key] = (result, time.time())
+            _cache.move_to_end(cache_key)
             _cleanup_expired()
 
         return result

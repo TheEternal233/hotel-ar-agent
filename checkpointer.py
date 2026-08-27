@@ -56,6 +56,8 @@ class JsonFileSaver(BaseCheckpointSaver):
         self._lock = threading.RLock()
         # 异步刷盘：待写入队列 + 后台线程
         self._dirty: Set[str] = set()
+        # 增量保存：记录每个线程变更的键
+        self._changed_keys: dict[str, set] = defaultdict(set)
         self._flush_event = threading.Event()
         self._shutdown = False
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
@@ -91,6 +93,43 @@ class JsonFileSaver(BaseCheckpointSaver):
         except OSError:
             pass
 
+    def _save_incremental_to_disk(self, thread_id: str, data: dict, changed_keys: set) -> None:
+        """增量保存：只序列化变更的键，减少 CPU 和内存开销。
+
+        如果磁盘文件不存在或变更范围过大（>30%），回退到全量保存。
+        """
+        fp = self._file_path(thread_id)
+        try:
+            total_keys = len(data.get("storage", {}).get(thread_id, {})) + \
+                        len(data.get("writes", {})) + len(data.get("blobs", {}))
+            # 变更比例过高时回退全量保存
+            if not fp.exists() or not changed_keys or (total_keys > 0 and len(changed_keys) / total_keys > 0.3):
+                self._save_to_disk(thread_id, data)
+                return
+
+            # 读取现有文件
+            with open(fp, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+
+            # 增量更新：只覆盖变更的部分
+            for key in changed_keys:
+                if key.startswith("storage:"):
+                    _, tid, ns, cp_id = key.split(":", 3)
+                    existing.setdefault("storage", {}).setdefault(tid, {}).setdefault(ns, {})[cp_id] = \
+                        self._serialize_checkpoint(data["storage"][tid][ns][cp_id])
+                elif key.startswith("writes:"):
+                    _, wkey = key.split(":", 1)
+                    existing["writes"][wkey] = self._serialize_writes(data["writes"][self._unpack_key(wkey)])
+                elif key.startswith("blobs:"):
+                    _, bkey = key.split(":", 1)
+                    existing["blobs"][bkey] = self._serialize_blob(data["blobs"][self._unpack_key(bkey)])
+
+            with open(fp, "w", encoding="utf-8") as f:
+                json.dump(existing, f, ensure_ascii=False, default=self._json_default)
+        except (OSError, json.JSONDecodeError, KeyError):
+            # 增量失败时回退到全量保存
+            self._save_to_disk(thread_id, data)
+
     def _flush_loop(self) -> None:
         """后台刷盘线程：定期将脏数据写入磁盘"""
         while not self._shutdown:
@@ -102,14 +141,21 @@ class JsonFileSaver(BaseCheckpointSaver):
             self._do_flush()
 
     def _do_flush(self) -> None:
-        """执行实际刷盘：批量写入所有脏数据"""
+        """执行实际刷盘：优先使用增量保存，减少序列化开销"""
         with self._lock:
             dirty_list = list(self._dirty)
             self._dirty.clear()
+            # 取出变更键记录
+            changed = {}
+            for tid in dirty_list:
+                changed[tid] = self._changed_keys.pop(tid, set())
         for tid in dirty_list:
             data = self._cache.get(tid)
             if data is not None:
-                self._save_to_disk(tid, data)
+                if changed.get(tid):
+                    self._save_incremental_to_disk(tid, data, changed[tid])
+                else:
+                    self._save_to_disk(tid, data)
 
     def _mark_dirty(self, thread_id: str) -> None:
         """标记 thread_id 为脏数据，触发后台异步写入"""
@@ -216,6 +262,33 @@ class JsonFileSaver(BaseCheckpointSaver):
     def _from_b64(s: str) -> bytes:
         import base64
         return base64.b64decode(s.encode("ascii"))
+
+    @staticmethod
+    def _serialize_checkpoint(cp_data: tuple) -> list:
+        """序列化单个检查点数据"""
+        cp_tuple, meta_tuple, parent = cp_data
+        return [
+            [cp_tuple[0], JsonFileSaver._to_b64(cp_tuple[1])],
+            [meta_tuple[0], JsonFileSaver._to_b64(meta_tuple[1])],
+            parent,
+        ]
+
+    @staticmethod
+    def _serialize_writes(writes: dict) -> dict:
+        """序列化单个 writes 块"""
+        result = {}
+        for (task_id, idx), (tid_w, ch, val_tuple, tpath) in writes.items():
+            inner_key = JsonFileSaver._pack_key(task_id, idx)
+            result[inner_key] = [
+                tid_w, ch, [val_tuple[0], JsonFileSaver._to_b64(val_tuple[1])], tpath
+            ]
+        return result
+
+    @staticmethod
+    def _serialize_blob(blob: tuple) -> list:
+        """序列化单个 blob"""
+        typ, val_bytes = blob
+        return [typ, JsonFileSaver._to_b64(val_bytes)]
 
     def _touch(self, thread_id: str) -> None:
         """将 thread_id 标记为最近使用（移动到缓存末尾）"""
@@ -414,21 +487,27 @@ class JsonFileSaver(BaseCheckpointSaver):
         values: dict[str, Any] = c.pop("channel_values")  # type: ignore[misc]
 
         data = self._get_thread_data(thread_id)
+        cp_id = checkpoint["id"]
 
         for k, v in new_versions.items():
-            data["blobs"][(thread_id, checkpoint_ns, k, v)] = (
+            blob_key = (thread_id, checkpoint_ns, k, v)
+            data["blobs"][blob_key] = (
                 self.serde.dumps_typed(values[k]) if k in values else ("empty", b"")
             )
+            # 记录 blob 变更
+            self._changed_keys[thread_id].add(f"blobs:{self._pack_key(*blob_key)}")
 
         data["storage"][thread_id][checkpoint_ns].update(
             {
-                checkpoint["id"]: (
+                cp_id: (
                     self.serde.dumps_typed(c),
                     self.serde.dumps_typed(get_checkpoint_metadata(config, metadata)),
                     config["configurable"].get("checkpoint_id"),  # parent
                 )
             }
         )
+        # 记录 storage 变更
+        self._changed_keys[thread_id].add(f"storage:{thread_id}:{checkpoint_ns}:{cp_id}")
 
         # 裁剪旧检查点，防止无限增长
         self._prune_checkpoints(thread_id, checkpoint_ns)
@@ -440,7 +519,7 @@ class JsonFileSaver(BaseCheckpointSaver):
             "configurable": {
                 "thread_id": thread_id,
                 "checkpoint_ns": checkpoint_ns,
-                "checkpoint_id": checkpoint["id"],
+                "checkpoint_id": cp_id,
             }
         }
 
@@ -460,6 +539,7 @@ class JsonFileSaver(BaseCheckpointSaver):
         outer_key = (thread_id, checkpoint_ns, checkpoint_id)
         outer_writes = data["writes"].get(outer_key, {})
 
+        has_new = False
         for idx, (c, v) in enumerate(writes):
             inner_key = (task_id, idx)
             if inner_key in outer_writes:
@@ -470,9 +550,13 @@ class JsonFileSaver(BaseCheckpointSaver):
                 self.serde.dumps_typed(v),
                 task_path,
             )
+            has_new = True
 
-        # 标记脏数据，由后台线程异步写入磁盘
-        self._mark_dirty(thread_id)
+        if has_new:
+            # 记录 writes 变更
+            self._changed_keys[thread_id].add(f"writes:{self._pack_key(*outer_key)}")
+            # 标记脏数据，由后台线程异步写入磁盘
+            self._mark_dirty(thread_id)
 
     def list(
         self,

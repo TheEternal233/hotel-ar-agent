@@ -34,7 +34,12 @@ INDEX_SUFFIX = ".idx.json"
 
 
 class AuditLogger:
-    """审计日志记录器（单例模式，线程安全）"""
+    """审计日志记录器（单例模式，线程安全）
+
+    性能优化：
+    - 写入操作只写日志文件，索引更新异步在后台线程完成
+    - 避免索引构建阻塞写入路径
+    """
 
     _instance = None
     _lock = threading.Lock()
@@ -51,6 +56,11 @@ class AuditLogger:
         self._initialized = True
         self._write_lock = threading.Lock()
         os.makedirs(AUDIT_DIR, exist_ok=True)
+        # 异步索引更新队列 + 后台线程
+        self._index_queue: list[tuple[str, dict, int]] = []
+        self._index_queue_lock = threading.Lock()
+        self._index_thread = threading.Thread(target=self._index_worker, daemon=True)
+        self._index_thread.start()
 
     # ────────── 内部工具 ──────────
 
@@ -117,18 +127,39 @@ class AuditLogger:
             self._save_index(log_file, index)
         return index
 
-    def _update_index_incremental(self, log_file: str, event: dict, offset: int) -> None:
-        if not os.path.exists(log_file):
-            return
-        index = self._load_index(log_file)
-        if index is None:
-            index = self._build_index(log_file)
-        else:
-            for dim in ("module", "action", "status", "user"):
-                val = event.get(dim, "")
-                if val:
-                    index.setdefault(dim, {}).setdefault(val, []).append(offset)
-        self._save_index(log_file, index)
+    def _index_worker(self) -> None:
+        """后台索引更新线程：消费队列异步更新索引"""
+        while True:
+            with self._index_queue_lock:
+                if not self._index_queue:
+                    batch = []
+                else:
+                    batch = self._index_queue.copy()
+                    self._index_queue.clear()
+            if not batch:
+                # 队列为空时短暂休眠，避免忙等
+                import time
+                time.sleep(0.1)
+                continue
+            # 按日志文件分组批量处理
+            by_file: dict[str, list[tuple[dict, int]]] = {}
+            for log_file, event, offset in batch:
+                by_file.setdefault(log_file, []).append((event, offset))
+            for log_file, items in by_file.items():
+                index = self._load_index(log_file)
+                if index is None:
+                    index = self._build_index(log_file)
+                for event, offset in items:
+                    for dim in ("module", "action", "status", "user"):
+                        val = event.get(dim, "")
+                        if val:
+                            index.setdefault(dim, {}).setdefault(val, []).append(offset)
+                self._save_index(log_file, index)
+
+    def _enqueue_index_update(self, log_file: str, event: dict, offset: int) -> None:
+        """将索引更新任务加入异步队列"""
+        with self._index_queue_lock:
+            self._index_queue.append((log_file, event, offset))
 
     # ────────── 写入 ──────────
 
@@ -169,7 +200,8 @@ class AuditLogger:
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
-            self._update_index_incremental(log_file, event, offset)
+        # 索引更新移出写入锁，异步后台处理
+        self._enqueue_index_update(log_file, event, offset)
 
         return event_id
 

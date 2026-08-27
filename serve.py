@@ -42,8 +42,20 @@ async def lifespan(app: FastAPI):
     logger.info("服务关闭")
 
 
+# 允许的前端来源（生产环境应配置为实际域名）
+# 支持从环境变量读取，未设置时允许本地开发地址
+import os as _os
+ALLOWED_ORIGINS = _os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173").split(",")
+
 app = FastAPI(title="酒店应收会计AI智能体系统", version="2.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_credentials=True,
+    max_age=600,
+)
 
 
 # ── 审计中间件：自动记录关键 API 请求 ──
@@ -114,6 +126,21 @@ async def health():
         "M01_数据准备", "M02_OTA对账", "M03_账龄分析", "M04_携程佣金",
         "M05_信用卡对账", "M06_协议客户", "M07_发票管理", "M08_智能调度"
     ]}
+
+
+# ── 请求体大小限制中间件 ──
+@app.middleware("http")
+async def request_size_limit(request: Request, call_next):
+    """限制请求体大小，防止恶意上传导致内存耗尽。"""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        max_size = 50 * 1024 * 1024  # 50MB
+        if int(content_length) > max_size:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "请求体过大，最大允许 50MB"}
+            )
+    return await call_next(request)
 
 
 app.include_router(chat.router)

@@ -6,21 +6,25 @@
 
 性能优化：内存缓存 id -> item 映射，避免每次查询都全量读取+解析文件。
 写入时同步更新缓存，读取时直接从缓存返回，O(1) 查询。
+缓存使用 LRU 策略，限制最大条目数防止内存无限增长。
 """
 
 import os
 import json
 import threading
 from datetime import datetime
+from collections import OrderedDict
 
 from deps import BASE_DIR
 
 APPROVAL_QUEUE_FILE = os.path.join(BASE_DIR, "data", "approval_queue.jsonl")
 _lock = threading.Lock()
 _COMPACT_THRESHOLD = 100
+_CACHE_MAX_SIZE = 256  # 最大缓存条目数
 
 # 内存缓存：id -> 最新版本 item（含 _deleted 标记），避免每次全量读盘
-_cache: dict[str, dict] = {}
+# 使用 OrderedDict 实现 LRU 淘汰
+_cache: OrderedDict[str, dict] = OrderedDict()
 _cache_initialized: bool = False
 _total_lines: int = 0
 
@@ -29,7 +33,7 @@ def _ensure_cache():
     global _cache, _cache_initialized, _total_lines
     if _cache_initialized:
         return
-    _cache = {}
+    _cache = OrderedDict()
     _total_lines = 0
     if os.path.exists(APPROVAL_QUEUE_FILE):
         with open(APPROVAL_QUEUE_FILE, "r", encoding="utf-8") as f:
@@ -46,6 +50,10 @@ def _ensure_cache():
                 if not oid:
                     continue
                 _cache[oid] = obj
+                _cache.move_to_end(oid)
+                # 加载时若超上限，淘汰最旧的
+                while len(_cache) > _CACHE_MAX_SIZE:
+                    _cache.popitem(last=False)
     _cache_initialized = True
 
 
@@ -58,6 +66,10 @@ def _append_and_cache(item: dict):
     oid = item.get("id")
     if oid:
         _cache[oid] = item
+        _cache.move_to_end(oid)
+        # LRU 淘汰：超出上限时移除最久未使用的条目
+        while len(_cache) > _CACHE_MAX_SIZE:
+            _cache.popitem(last=False)
 
 
 def _read_all_lines() -> list[str]:
@@ -172,6 +184,8 @@ def get_approval_item(approval_id: str) -> dict | None:
         item = _cache.get(approval_id)
         if item is None or item.get("_deleted"):
             return None
+        # 访问后移到末尾标记为最近使用
+        _cache.move_to_end(approval_id)
         return item
 
 

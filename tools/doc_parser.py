@@ -423,40 +423,7 @@ def read_ota_channel(path, channel_name, sheet_name=None, wb=None):
 
 @file_cache
 def detect_ota_channel(path):
-    wb, ws = _open(path)
-    try:
-        headers = _get_headers(ws, 1)
-        headers_str = " ".join(str(h) for h in headers if h)
-
-        rezen_markers = ["账单号", "外部订单号", "协议单位"]
-        rezen_score = sum(1 for m in rezen_markers if m in headers_str)
-        if rezen_score >= 2:
-            return "rezen"
-
-        if "财务总对账" in wb.sheetnames and "PMS" in wb.sheetnames:
-            return "向蜜鸟"
-
-        if "美团订单号" in headers_str:
-            return "美团客房"
-        if "券号" in headers_str and "美食林券号" in headers_str:
-            return "携程餐饮"
-        if "券号" in headers_str and "订单号" in headers_str and "售价" in headers_str:
-            return "美团餐饮"
-        if "核销时间" in headers_str and "订单编号" in headers_str:
-            return "抖音"
-        if "套餐订单号" in headers_str or ("订单号" in headers_str and "入住人" in headers_str):
-            return "飞猪"
-
-        # Check for 携程客房 (header in row 2)
-        if "预付订单明细" in headers_str or "订单类型" in headers_str:
-            row2 = [c.value for c in next(ws.iter_rows(min_row=2, max_row=2))]
-            row2_str = " ".join(str(v) for v in row2 if v)
-            if "订单号" in row2_str and "结算价" in row2_str:
-                return "携程客房"
-
-        return None
-    finally:
-        wb.close()
+    return detect_ota_channel_fast(path)
 
 def _fast_read_xlsx_headers(path, max_rows=2):
     """用 zipfile+xml 快速读取 xlsx 的前几行表头，不经过 openpyxl 完整加载"""
