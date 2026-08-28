@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+import asyncio
 
 from tools.ctrip_commission_reconcile.ctrip_commission import ctrip_commission
 from deps import logger
@@ -10,7 +11,7 @@ router = APIRouter(prefix="/api", tags=["ctrip"])
 @router.post("/ctrip/commission")
 async def ctrip_commission_endpoint(req: CtripRequest):
     try:
-        result = ctrip_commission.invoke({
+        result = await asyncio.to_thread(ctrip_commission.invoke, {
             "ctrip_filename": req.settlement_path,
             "pms_filename": req.pms_path,
         })

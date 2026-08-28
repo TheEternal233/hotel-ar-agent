@@ -17,3 +17,20 @@ uploads/
 # IDE
 .idea/
 .vscode/
+/data/approval_queue.jsonl
+/data/audit/audit_20260822.jsonl
+/data/audit/audit_20260822.jsonl.idx.json
+/data/audit/audit_20260824.jsonl
+/data/audit/audit_20260824.jsonl.idx.json
+/data/audit/audit_20260825.jsonl
+/data/audit/audit_20260825.jsonl.idx.json
+/data/audit/audit_20260826.jsonl
+/data/audit/audit_20260826.jsonl.idx.json
+/data/audit/audit_20260827.jsonl
+/data/audit/audit_20260827.jsonl.idx.json
+/data/清远/携程佣金核对/ctrip_commission_test.xlsx
+/data/failed_tasks.jsonl
+/data/清远/携程佣金核对/pms_test.xlsx
+/data/memory/web-1787645896857.json
+/data/memory/web-1787646179665.json
+/data/memory/web-1787712089505.json

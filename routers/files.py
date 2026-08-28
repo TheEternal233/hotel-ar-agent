@@ -1,4 +1,5 @@
 import shutil
+import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -112,7 +113,6 @@ async def validate_uploaded_file(file: UploadFile = File(...)):
     自动识别: 绿云PMS / OTA渠道(携程/美团/飞猪/抖音/向蜜鸟) / 应收 / 信用卡 / 携程结算单
     返回: {ok, filename, path, size, valid, file_kind, preview, error}
     """
-    # 1. 保存到 uploads
     UPLOAD_DIR.mkdir(exist_ok=True)
     file_path = (UPLOAD_DIR / file.filename).resolve()
     if not is_safe_path(file_path, UPLOAD_DIR):
@@ -122,26 +122,30 @@ async def validate_uploaded_file(file: UploadFile = File(...)):
     with open(file_path, "wb") as f:
         f.write(content)
 
+    return await asyncio.to_thread(_validate_file_sync, str(file_path), file.filename, file_path.stat().st_size)
+
+
+def _validate_file_sync(file_path_str: str, filename: str, size: int):
+    from pathlib import Path
+    file_path = Path(file_path_str)
     result = {
         "ok": True,
-        "filename": file.filename,
-        "path": str(file_path),
-        "size": file_path.stat().st_size,
+        "filename": filename,
+        "path": file_path_str,
+        "size": size,
         "valid": False,
         "file_kind": None,
         "preview": None,
         "error": None,
     }
 
-    # 2. 扩展名校验
     ext = file_path.suffix.lower()
     if ext not in (".xlsx", ".xls"):
         result["error"] = f"格式错误：仅支持 .xlsx / .xls，实际为 {ext}"
         return result
 
-    # 3. 自动检测文件类型并校验
     try:
-        info = get_info(str(file_path))
+        info = get_info(file_path_str)
         headers = info.get("headers", [])
         headers_str = " ".join(str(h) for h in headers if h)
         result["preview"] = {
@@ -151,8 +155,7 @@ async def validate_uploaded_file(file: UploadFile = File(...)):
             "headers": headers[:20],
         }
 
-        # 先尝试识别 OTA 渠道（包含 PMS 绿云）
-        detected = detect_ota_channel(str(file_path))
+        detected = detect_ota_channel(file_path_str)
 
         if detected == "rezen":
             result["file_kind"] = "绿云 PMS"
@@ -167,12 +170,10 @@ async def validate_uploaded_file(file: UploadFile = File(...)):
             result["valid"] = True
             return result
 
-        # 尝试识别其他类型
-        # 应收台账特征
         aging_markers = ["客户", "customer", "到期", "due", "应收金额", "账龄"]
         aging_score = sum(1 for m in aging_markers if m in headers_str)
         if aging_score >= 2:
-            ok, msg = validate(str(file_path), ["客户", "金额"])
+            ok, msg = validate(file_path_str, ["客户", "金额"])
             if ok:
                 result["file_kind"] = "应收台账"
                 result["valid"] = True
@@ -180,11 +181,10 @@ async def validate_uploaded_file(file: UploadFile = File(...)):
                 result["error"] = f"疑似应收台账但缺少必要列: {msg}"
             return result
 
-        # 信用卡/银行对账单特征
         card_markers = ["交易日期", "交易金额", "卡号", "日期", "金额", "card", "date"]
         card_score = sum(1 for m in card_markers if m in headers_str)
         if card_score >= 2:
-            ok, msg = validate(str(file_path), ["日期", "金额"])
+            ok, msg = validate(file_path_str, ["日期", "金额"])
             if ok:
                 result["file_kind"] = "信用卡/银行对账单"
                 result["valid"] = True
@@ -192,11 +192,10 @@ async def validate_uploaded_file(file: UploadFile = File(...)):
                 result["error"] = f"疑似对账单但缺少必要列: {msg}"
             return result
 
-        # 携程结算单特征
         ctrip_markers = ["订单号", "间夜", "房费", "佣金", "结算"]
         ctrip_score = sum(1 for m in ctrip_markers if m in headers_str)
         if ctrip_score >= 2:
-            ok, msg = validate(str(file_path), ["订单号"])
+            ok, msg = validate(file_path_str, ["订单号"])
             if ok:
                 result["file_kind"] = "携程结算单"
                 result["valid"] = True
@@ -204,11 +203,10 @@ async def validate_uploaded_file(file: UploadFile = File(...)):
                 result["error"] = f"疑似携程结算单但缺少必要列: {msg}"
             return result
 
-        # 通用 PMS 兜底
         pms_markers = ["账单号", "类型", "日期", "房号", "金额"]
         pms_score = sum(1 for m in pms_markers if m in headers_str)
         if pms_score >= 2:
-            ok, msg = validate(str(file_path), ["账单号", "类型"])
+            ok, msg = validate(file_path_str, ["账单号", "类型"])
             if ok:
                 result["file_kind"] = "PMS 报表"
                 result["valid"] = True

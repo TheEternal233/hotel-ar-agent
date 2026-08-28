@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+import asyncio
 
 from tools.protocol_settlement.aging_pms import aging_and_notice
 from deps import logger
@@ -11,7 +12,7 @@ router = APIRouter(prefix="/api", tags=["aging"])
 async def aging_analyze(req: AgingRequest):
     try:
         notice_month = req.as_of_date[:7] if req.as_of_date else ""
-        result = aging_and_notice.invoke({
+        result = await asyncio.to_thread(aging_and_notice.invoke, {
             "receivable_path": req.receivable_path,
             "as_of_date": req.as_of_date,
             "notice_month": notice_month,
@@ -25,7 +26,7 @@ async def aging_analyze(req: AgingRequest):
 @router.post("/aging/notice")
 async def aging_notice(req: AgingNoticeRequest):
     try:
-        result = aging_and_notice.invoke({
+        result = await asyncio.to_thread(aging_and_notice.invoke, {
             "receivable_path": req.receivable_path,
             "as_of_date": req.as_of_date,
             "notice_month": req.notice_month,

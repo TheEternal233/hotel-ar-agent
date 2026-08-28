@@ -1,4 +1,5 @@
 import os
+import asyncio
 
 from fastapi import APIRouter, HTTPException
 
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["card"])
 @router.post("/card/recon")
 async def card_recon(req: CardReconRequest):
     try:
-        result = credit_card_recon.invoke({"bank_statement_path": req.bank_statement_path, "pms_card_path": req.pms_card_path})
+        result = await asyncio.to_thread(credit_card_recon.invoke, {"bank_statement_path": req.bank_statement_path, "pms_card_path": req.pms_card_path})
         cleanup_uploads([req.bank_statement_path, req.pms_card_path])
         return {"ok": True, "result": str(result)}
     except Exception as e:
@@ -30,7 +31,7 @@ async def card_recon(req: CardReconRequest):
 async def batch_card():
     try:
         from tools.credit_card_recon import batch_card_recon
-        result = batch_card_recon()
+        result = await asyncio.to_thread(batch_card_recon)
         return {"ok": True, "result": str(result)}
     except Exception as e:
         logger.error(f"Batch card error: {e}")
@@ -41,6 +42,10 @@ async def batch_card():
 @router.post("/card/recon_preview")
 async def card_recon_preview(req: CardReconRequest):
     """对账预览：返回结构化对账明细，供前端展示审核"""
+    return await asyncio.to_thread(_card_recon_preview_sync, req)
+
+
+def _card_recon_preview_sync(req: CardReconRequest):
     try:
         bank_path = req.bank_statement_path
         pms_path = req.pms_card_path
@@ -121,6 +126,10 @@ async def card_recon_preview(req: CardReconRequest):
 @router.post("/card/recon_confirm")
 async def card_recon_confirm(req: CardReconConfirmRequest):
     """人工审核确认后生成对账报告。优先使用前端传入的recon_results，避免重复匹配"""
+    return await asyncio.to_thread(_card_recon_confirm_sync, req)
+
+
+def _card_recon_confirm_sync(req: CardReconConfirmRequest):
     try:
         bank_path = req.bank_statement_path
         pms_path = req.pms_card_path
@@ -128,11 +137,9 @@ async def card_recon_confirm(req: CardReconConfirmRequest):
             if not p or not os.path.exists(p):
                 raise HTTPException(status_code=400, detail=f"文件不存在: {p}")
 
-        # 优先使用前端传入的匹配结果，避免重复计算
         if req.recon_results:
             recon_results = req.recon_results
         else:
-            # 兼容旧逻辑：前端未传入时重新执行匹配
             bank_lower = bank_path.lower()
             pms_lower = pms_path.lower()
             recon_results = []

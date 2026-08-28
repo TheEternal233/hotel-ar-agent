@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 import asyncio
+import threading
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -11,10 +12,48 @@ from deps import get_graph, cleanup_uploads, UPLOAD_DIR, is_safe_path, logger
 from schemas import ChatRequest, ChatResponse
 
 MEMORY_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "memory")
+THREADS_INDEX_PATH = os.path.join(MEMORY_DIR, "threads_index.json")
+_threads_index_lock = threading.Lock()
 from orchestrator.approval_store import create_approval_item
 from orchestrator.supervisor import ConfidenceAssessor
 
 router = APIRouter(prefix="/api", tags=["chat"])
+
+
+def _load_threads_index() -> dict:
+    try:
+        if os.path.exists(THREADS_INDEX_PATH):
+            with open(THREADS_INDEX_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_threads_index(index: dict) -> None:
+    os.makedirs(MEMORY_DIR, exist_ok=True)
+    with _threads_index_lock:
+        try:
+            with open(THREADS_INDEX_PATH, "w", encoding="utf-8") as f:
+                json.dump(index, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+
+def _update_thread_preview(thread_id: str, preview: str) -> None:
+    index = _load_threads_index()
+    index[thread_id] = {
+        "preview": preview[:60] if preview else "",
+        "updated": os.path.getmtime(os.path.join(MEMORY_DIR, f"{_safe_thread_id(thread_id)}.json"))
+        if os.path.exists(os.path.join(MEMORY_DIR, f"{_safe_thread_id(thread_id)}.json"))
+        else __import__("time").time(),
+    }
+    _save_threads_index(index)
+
+
+def _safe_thread_id(thread_id: str) -> str:
+    safe_id = "".join(c for c in thread_id if c.isalnum() or c in "_-").rstrip()
+    return safe_id or "unknown"
 
 
 # ========== 重试装饰器 ==========
@@ -122,6 +161,7 @@ async def chat(req: ChatRequest):
                 f"复核通过后，结果将正式生效。"
             )
             cleanup_uploads(req.uploaded_files)
+            _update_thread_preview(thread_id, req.message)
             return ChatResponse(
                 response=blocked_message,
                 thread_id=thread_id,
@@ -131,6 +171,7 @@ async def chat(req: ChatRequest):
             )
 
         cleanup_uploads(req.uploaded_files)
+        _update_thread_preview(thread_id, req.message)
         return ChatResponse(
             response=response_text,
             thread_id=thread_id,
@@ -160,7 +201,8 @@ async def chat_stream(req: ChatRequest):
         if req.uploaded_files:
             msg_content = "用户已上传以下文件：\n" + "\n".join(f"  - {f}" for f in req.uploaded_files) + "\n\n用户请求：" + req.message
         user_input = {"messages": [HumanMessage(content=msg_content)]}
-        cfg = {"configurable": {"thread_id": req.thread_id or str(uuid.uuid4())}}
+        tid = req.thread_id or str(uuid.uuid4())
+        cfg = {"configurable": {"thread_id": tid}}
 
         try:
             # 流式也加超时控制（整体超时120秒）
@@ -200,12 +242,13 @@ async def chat_stream(req: ChatRequest):
                     mode="ai_chat"
                 )
                 logger.info(f"AI流式对话结果已加入审批队列: {approval_info['id']}")
-                # 发送阻断指令给前端，让前端清空已显示内容并显示审批提示
-                yield f"data: {json.dumps({'type':'approval_needed','approval_id':approval_info['id'],'confidence':confidence,'task_name':task_name}, ensure_ascii=False)}\n\n"
+                _update_thread_preview(tid, req.message)
                 cleanup_uploads(req.uploaded_files)
+                yield f"data: {json.dumps({'type':'approval_needed','approval_id':approval_info['id'],'confidence':confidence,'task_name':task_name}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
+        _update_thread_preview(tid, req.message)
         cleanup_uploads(req.uploaded_files)
         yield "data: [DONE]\n\n"
 
@@ -227,60 +270,25 @@ async def upload_file(file: UploadFile = File(...)):
 
 @router.get("/chat/threads")
 async def list_threads():
-    """列出所有对话历史。"""
+    """列出所有对话历史。使用轻量索引文件，避免解析 msgpack。"""
     threads = []
     if not os.path.exists(MEMORY_DIR):
         return {"threads": threads}
 
+    index = _load_threads_index()
+
     for filename in os.listdir(MEMORY_DIR):
-        if not filename.endswith(".json"):
+        if not filename.endswith(".json") or filename == "threads_index.json":
             continue
         filepath = os.path.join(MEMORY_DIR, filename)
-        thread_id = filename[:-5]  # 去掉 .json
+        thread_id = filename[:-5]
         mtime = os.path.getmtime(filepath)
 
-        # 尝试提取首条用户内容作为预览
-        preview = ""
-        try:
-            import base64, msgpack as _msgpack
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            blobs = data.get("blobs", {})
-            for key, val in blobs.items():
-                if val[0] != "msgpack":
-                    continue
-                b = base64.b64decode(val[1])
-                try:
-                    decoded = _msgpack.unpackb(b, raw=False, strict_map_key=False)
-                except Exception:
-                    continue
-                if not isinstance(decoded, list):
-                    continue
-                for item in decoded:
-                    if not isinstance(item, _msgpack.ExtType):
-                        continue
-                    try:
-                        inner = _msgpack.unpackb(item.data, raw=False, strict_map_key=False)
-                    except Exception:
-                        continue
-                    if not (isinstance(inner, (list, tuple)) and len(inner) >= 3):
-                        continue
-                    msg_dict = inner[2]
-                    if not isinstance(msg_dict, dict):
-                        continue
-                    msg_type = msg_dict.get("type", "")
-                    content = msg_dict.get("content", "")
-                    # 优先取 human（用户）消息作为预览
-                    if msg_type == "human" and content and len(str(content)) >= 1:
-                        preview = str(content)[:60]
-                        break
-                    # 如果没有 human 消息，取第一个有意义的 ai 消息
-                    if not preview and msg_type == "ai" and content and len(str(content)) >= 2:
-                        preview = str(content)[:60]
-                if preview:
-                    break
-        except Exception as e:
-            logger.warning(f"提取对话预览失败 {thread_id}: {e}")
+        entry = index.get(thread_id)
+        if entry:
+            preview = entry.get("preview", "")
+        else:
+            preview = ""
 
         threads.append({
             "thread_id": thread_id,
@@ -332,11 +340,14 @@ async def get_thread_messages(thread_id: str, limit: int = 50):
 @router.delete("/chat/threads/{thread_id}")
 async def delete_thread(thread_id: str):
     """删除指定对话。"""
-    safe_id = "".join(c for c in thread_id if c.isalnum() or c in "_-").rstrip()
+    safe_id = _safe_thread_id(thread_id)
     if not safe_id:
         raise HTTPException(status_code=400, detail="无效的对话ID")
     filepath = os.path.join(MEMORY_DIR, f"{safe_id}.json")
     if os.path.exists(filepath):
         os.remove(filepath)
+        index = _load_threads_index()
+        index.pop(thread_id, None)
+        _save_threads_index(index)
         return {"deleted": True, "thread_id": thread_id}
     return {"deleted": False, "thread_id": thread_id, "reason": "文件不存在"}

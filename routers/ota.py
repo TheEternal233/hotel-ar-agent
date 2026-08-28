@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request
+import asyncio
 
 from tools.ar_recon import ar_recon, _match_ota_rezen_fnb, FNB_CHANNELS, match_xiangminiao, _match_ota_rezen
 from deps import logger
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/api", tags=["ota"])
 @router.post("/ota/recon")
 async def ota_recon(req: OtaReconRequest):
     try:
-        result = ar_recon.invoke({"ota_path": req.ota_path, "pms_path": req.pms_path})
+        result = await asyncio.to_thread(ar_recon.invoke, {"ota_path": req.ota_path, "pms_path": req.pms_path})
         return {"ok": True, "result": str(result)}
     except Exception as e:
         logger.error(f"OTA recon error: {e}")
@@ -23,7 +24,7 @@ async def ota_recon(req: OtaReconRequest):
 async def batch_ota():
     try:
         from tools.ar_recon import batch_ota_recon
-        result = batch_ota_recon()
+        result = await asyncio.to_thread(batch_ota_recon)
         return {"ok": True, "result": str(result)}
     except Exception as e:
         logger.error(f"Batch OTA error: {e}")
@@ -32,6 +33,10 @@ async def batch_ota():
 @router.post("/ota/upload_preview")
 async def ota_upload_preview(req: OtaUploadRequest):
     """Step 1: 上传文件后返回预览信息（行数、列名、检测到的渠道）"""
+    return await asyncio.to_thread(_ota_upload_preview_sync, req)
+
+
+def _ota_upload_preview_sync(req: OtaUploadRequest):
     try:
         import os
         result = {"ota": None, "pms": None}
@@ -69,6 +74,10 @@ async def ota_upload_preview(req: OtaUploadRequest):
 @router.post("/ota/match_preview")
 async def ota_match_preview(req: OtaMatchRequest):
     """Step 2: 执行匹配，返回明细结果（匹配成功、差异、单边）"""
+    return await asyncio.to_thread(_ota_match_preview_sync, req)
+
+
+def _ota_match_preview_sync(req: OtaMatchRequest):
     try:
         import os
         if not os.path.exists(req.ota_path):
@@ -93,7 +102,6 @@ async def ota_match_preview(req: OtaMatchRequest):
             rezen_records = read_rezen(req.pms_path)
             results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
 
-        # 格式化明细数据供前端展示
         match_list = []
         diff_list = []
         ota_only_list = []
@@ -132,8 +140,10 @@ async def ota_match_preview(req: OtaMatchRequest):
                 "ota_only": ota_only_list,
                 "pms_only": pms_only_list,
             },
-            "raw_results": results # 原始匹配结果
+            "raw_results": results
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"OTA match preview error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -141,6 +151,10 @@ async def ota_match_preview(req: OtaMatchRequest):
 @router.post("/ota/confirm")
 async def ota_confirm(req: OtaConfirmRequest):
     """Step 3: 用户确认差异后，生成最终报告。优先使用前端传入的match_results，避免重复匹配"""
+    return await asyncio.to_thread(_ota_confirm_sync, req)
+
+
+def _ota_confirm_sync(req: OtaConfirmRequest):
     try:
         import os
         from tools.ar_recon.report_generator import _generate_ar_report_a, _generate_ar_report_fnb, _generate_ar_report
@@ -148,12 +162,10 @@ async def ota_confirm(req: OtaConfirmRequest):
 
         channel = req.channel or detect_ota_channel(req.ota_path)
 
-        # 优先使用前端传入的匹配结果，避免重复计算
         if req.match_results:
             results = req.match_results
             stats = req.stats or {}
         else:
-            # 兼容旧逻辑：前端未传入时重新执行匹配
             if channel == "向蜜鸟":
                 from utils.ar_recon_utils import read_xiangminiao
                 ota_records, card_records, rezen_records = read_xiangminiao(req.ota_path)
@@ -167,7 +179,6 @@ async def ota_confirm(req: OtaConfirmRequest):
                 rezen_records = read_rezen(req.pms_path)
                 results, stats = _match_ota_rezen(ota_records, rezen_records, channel)
 
-        # 生成报告
         if channel == "向蜜鸟":
             report_path = _generate_ar_report(results, stats, channel, req.ota_path, req.pms_path)
         elif channel in FNB_CHANNELS:
@@ -175,7 +186,6 @@ async def ota_confirm(req: OtaConfirmRequest):
         else:
             report_path = _generate_ar_report_a(results, stats, channel, req.ota_path, req.pms_path)
 
-        # 清理上传文件
         for p in (req.ota_path, req.pms_path):
             try:
                 if os.path.exists(p):
@@ -196,6 +206,8 @@ async def ota_confirm(req: OtaConfirmRequest):
                 "diffs": len(req.confirmed_diffs),
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"OTA confirm error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
