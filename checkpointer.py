@@ -44,6 +44,7 @@ class JsonFileSaver(BaseCheckpointSaver):
         max_cache_threads: int = 50,
         max_checkpoints_per_thread: int = 100,
         flush_interval: float = 2.0,
+        max_file_age_days: int = 7,
     ):
         super().__init__()
         self.save_dir = Path(save_dir)
@@ -51,6 +52,7 @@ class JsonFileSaver(BaseCheckpointSaver):
         self.max_cache = max(max_cache_threads, 1)
         self.max_checkpoints = max(max_checkpoints_per_thread, 10)
         self.flush_interval = flush_interval
+        self.max_file_age_days = max(max_file_age_days, 1)
         # 内存缓存：thread_id -> 存储数据
         self._cache: dict[str, dict] = {}
         self._lock = threading.RLock()
@@ -62,6 +64,9 @@ class JsonFileSaver(BaseCheckpointSaver):
         self._shutdown = False
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
         self._flush_thread.start()
+        # 启动磁盘清理线程：定期删除长期不活跃的 thread 文件
+        self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
+        self._cleanup_thread.start()
 
     def _file_path(self, thread_id: str) -> Path:
         """生成线程对应的 JSON 文件路径（过滤非法字符）"""
@@ -649,6 +654,33 @@ class JsonFileSaver(BaseCheckpointSaver):
     # 管理接口
     # ------------------------------------------------------------------
 
+    def _cleanup_loop(self) -> None:
+        """后台清理线程：每天扫描一次，删除超过 max_file_age_days 未修改的 thread 文件"""
+        while not self._shutdown:
+            # 每 6 小时检查一次
+            time.sleep(21600)
+            if self._shutdown:
+                break
+            self._cleanup_old_files()
+
+    def _cleanup_old_files(self) -> int:
+        """删除超过保留期限的旧文件，返回删除数量"""
+        cutoff = time.time() - self.max_file_age_days * 86400
+        deleted = 0
+        for fp in self.save_dir.glob("*.json"):
+            try:
+                if fp.stat().st_mtime < cutoff:
+                    # 如果文件对应的 thread 还在内存缓存中，先卸载
+                    thread_id = fp.stem
+                    with self._lock:
+                        if thread_id in self._cache:
+                            del self._cache[thread_id]
+                    fp.unlink()
+                    deleted += 1
+            except OSError:
+                pass
+        return deleted
+
     def close(self) -> None:
         """安全关闭：停止后台刷盘线程并确保所有数据落盘"""
         if self._shutdown:
@@ -656,6 +688,8 @@ class JsonFileSaver(BaseCheckpointSaver):
         self._shutdown = True
         self._flush_event.set()
         self._flush_thread.join(timeout=5.0)
+        if hasattr(self, "_cleanup_thread"):
+            self._cleanup_thread.join(timeout=1.0)
         self._do_flush()
 
     def __del__(self) -> None:
